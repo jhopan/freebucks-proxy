@@ -159,3 +159,18 @@ dotenv → static → live → SSE hash → store refresh.
   via import grep, CI Linux is the real proof.
 - Public repo: zero secrets in code, transcripts, or comments. Rotate on
   suspicion; test live with user-provided keys only.
+
+## 6. Deployment (fork ops)
+
+- Prod VPS: `vps-natusa` (ssh alias), binary+systemd di `/opt/freebuff-proxy/`
+  (service `freebuff-proxy`, internal port 3457).
+- **URL publik (NAT host provider): `http://192.154.111.198:34570/`** —
+  34570 → 3457. Healthz dari LUAR: `curl http://192.154.111.198:34570/healthz`
+  (curl dari dalam VPS ke IP publik sendiri selalu 000 — OpenVZ venet NAT).
+- Update: build `GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -tags dashboard`
+  dari fork main → scp sebagai `freebuff-proxy.new*` → JANGAN timpa langsung:
+  `cp -a freebuff-proxy freebuff-proxy.bak-<label>` dulu → swap → restart →
+  healthz dari luar. Rollback = restore file `.bak-*`.
+- Fork Actions: workflow push-trigger kadang tidak jalan di fork; semua
+  workflow inti punya `workflow_dispatch` — jalankan manual via
+  `gh workflow run ci.yml -R jhopan/freebuff-proxy --ref main`.
