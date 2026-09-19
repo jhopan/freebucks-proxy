@@ -23,6 +23,12 @@ Machine-readable rules for agents working in this repo. Human overview lives in
 
 ## 2. Topology
 
+## 1b. Git sources (remotes)
+
+- `origin` — `https://github.com/jhopan/freebuff-proxy.git` — fork kita; push branch kerja + PR fitur ke sini.
+- `upstream` — `https://github.com/trefeon/freebuff-proxy.git` — repo resmi freebuff-proxy (read-only; push ditolak kecuali collaborator). Sinkron via `git fetch upstream`.
+- vendor — `https://github.com/CodebuffAI/freebuff.git` — clone gitignored di `upstream/freebuff`, sumber kebenaran wire/registry/model (lihat baris `upstream/freebuff` di bawah).
+
 - `backend/` — Go gateway (`cmd/`, `internal/`). `internal/` packages include
   `server`, `pool`, `upstream`, `session`, `store`, `config`, `dashboard`,
   `modelcat`, `registry`, `wirefacts`.
