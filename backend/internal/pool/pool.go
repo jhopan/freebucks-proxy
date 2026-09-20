@@ -152,6 +152,19 @@ type TokenSnapshot struct {
 	// AccessTier is the upstream access tier from the last session admission
 	// ("full", "limited", "free"); "" until reported.
 	AccessTier string `json:"access_tier,omitempty"`
+	// SubscriptionTierID is the raw upstream subscription.tierId from the
+	// token's last admission/probe (the upstream plan id behind
+	// hasPaidSubscription); "" until reported. Kept verbatim, never parsed
+	// into a plan name.
+	SubscriptionTierID string `json:"subscription_tier_id,omitempty"`
+	// LimitedModelOffers carries the capacity-limited models the picker may
+	// additionally offer right now (vendor FreebuffLimitedModelOffer) from
+	// the token's last pre-join response; nil until one reports offers. It
+	// is a detached copy of the session snapshot's slice (never aliased) so
+	// a dashboard reader cannot observe pooled live state. LimitedOfferReason
+	// is the vendor's opaque refusal member ("" when absent).
+	LimitedModelOffers []upstream.LimitedModelOffer `json:"limited_model_offers,omitempty"`
+	LimitedOfferReason string                       `json:"limited_offer_reason,omitempty"`
 	// SessionActiveUsersForIP is the last known distinct-user count on the
 	// token's egress IP (upstream activeUsersForIp); zero when the session
 	// response did not carry it.
@@ -365,8 +378,13 @@ type Pool struct {
 	// Guarded by routeMu. In-memory only: a restart resets every counter
 	// to zero (same discipline as the probe scheduler's transient flags)
 	// - no pool_state rows, no SQL.
-	routeMu    sync.Mutex
-	routeSlots map[slotKey]*slotState
+	// Smart model queues (model_queue.go) share routeMu: one
+	// work-conserving FIFO per model for pooled entries (bridge entries
+	// keep the per-lane park above). Lazily created like routeSlots, so
+	// no constructor change is needed.
+	routeMu     sync.Mutex
+	routeSlots  map[slotKey]*slotState
+	routeQueues map[string]*modelQueue
 
 	// MASQ precious sessions (precious.go): open set of (entry, model)
 	// pairs whose live session is never proactively dropped (load drops,
