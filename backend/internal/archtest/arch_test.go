@@ -149,8 +149,8 @@ var allowed = map[string][]string{
 		"internal/updatecheck",
 		"internal/upstream",
 	},
-	"internal/cli/port":    {},
-	"internal/cli/setup":   {},
+	"internal/cli/port":  {},
+	"internal/cli/setup": {},
 	"internal/cli/update": {
 		// Fork guard (jhopan/freebuff-proxy): -update refuses to install a
 		// release older than the running fork build (X.Y.Z.<fork-rev>).
