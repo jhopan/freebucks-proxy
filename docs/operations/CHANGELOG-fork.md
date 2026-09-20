@@ -3,6 +3,29 @@
 Catatan perubahan pada fork ini di atas upstream `trefeon/freebuff-proxy`.
 Rilis resmi tetap mengikuti upstream; hanya deviasi fork yang dicatat di sini.
 
+## 2026-09-20 (2) - merge upstream: vendor 0.0.180 + fix TTFT
+
+### Perubahan
+
+- **Merge `8eefffd9`** (parent: fork `5fa648fa` + upstream `d6645f4f`). Tujuh
+  commit upstream masuk, tanpa menyentuh commit fork (docs, test pin,
+  workflow_dispatch) - semua diverifikasi utuh pasca-merge.
+  - `d6645f4f` fix(pool,dashboard): drop per-request work that grows with
+    request count (**fix #656 TTFT naik linear**)
+  - `e3168508` hapus kartu Pool "Custom advanced" dari dashboard
+  - `347be49e` toast pindah top-center, fade 10s
+  - `f144b457` / `57772f4d` / `73d599f6` / `f871c22c` - re-pin vendor
+    `2b165f7` (freebuff **0.0.180**) + refresh baseline/drift + dokumen CLI
+- Vendor pin sekarang **0.0.180** (`scripts/vendor-version.txt`).
+
+### Hasil uji
+
+- `go test ./backend/...` di tree hasil merge: hijau (exit 0, tanpa FAIL).
+- VPS redeploy build `8eefffd9` (sha256 `7b8f8792...`), backup lama
+  disimpan sebagai `freebuff-proxy.bak-5f3b59c3`.
+- Healthz dari luar `http://192.154.111.198:34570/healthz` = 200; live test
+  32 tool Hermes -> deepseek = HTTP 200.
+
 ## 2026-09-20 — toolset Hermes penuh lolos, VPS deploy build fork
 
 ### Perubahan
