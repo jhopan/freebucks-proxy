@@ -7,6 +7,11 @@
 # through this script: build the platform assets, write checksums.txt, and
 # create the GitHub release on OUR repo with `gh`.
 #
+# NOTE: GitHub Actions is the canonical build path now
+# (.github/workflows/fork-release.yml builds and publishes on a v* tag
+# push). Keep this script as the offline fallback for when Actions is
+# unavailable; it produces the identical asset names and layout.
+#
 # Usage:  sh scripts/fork-release.sh [--dry-run]
 # Requires: gh authenticated for the fork repo, plus go + tar + sha256sum.
 set -eu

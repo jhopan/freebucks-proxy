@@ -1,8 +1,12 @@
 name: release
 
+# FORK: disabled. This workflow drives GoReleaser, which hardcodes
+# `release.github.owner: trefeon` (.goreleaser.yml) and rejects the fork tag
+# scheme X.Y.Z.<fork-rev> (not valid semver), so it can never publish here.
+# Fork builds live in .github/workflows/fork-release.yml. Keep this file for
+# diff hygiene against upstream; do not re-enable the tag trigger.
 on:
-  push:
-    tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write

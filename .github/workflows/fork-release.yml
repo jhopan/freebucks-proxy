@@ -1,0 +1,176 @@
+name: fork-release
+
+# Build and publish a FORK release from GitHub Actions.
+#
+# Upstream's release.yml drives GoReleaser, which hardcodes
+# `release.github.owner: trefeon` (.goreleaser.yml) and rejects 4-component
+# tags (X.Y.Z.<fork-rev> is not valid semver), so it can never publish a fork
+# release. This workflow is the fork's build path: every fork build is produced
+# and published here, and the VPS installs it through `-update` against the
+# fork's own release channel (no local build, no scp).
+#
+# Version scheme (AGENTS.md section 6): <upstream vX.Y.Z>.<commits since tag>,
+# computed by scripts/fork-version.sh. A pushed tag must equal that computed
+# version; the workflow fails loudly when the two disagree.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, e.g. 1.13.0.17 (empty = scripts/fork-version.sh)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fork-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REPO: jhopan/freebuff-proxy
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: v
+        run: |
+          set -eu
+          computed=$(sh scripts/fork-version.sh)
+          version="$computed"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.version }}" ]; then
+            version="${{ inputs.version }}"
+          fi
+          tag="v$version"
+          if [ "${{ github.event_name }}" = "push" ] && [ "$tag" != "${{ github.ref_name }}" ]; then
+            echo "::error::tag ${{ github.ref_name }} != computed fork version $tag (scripts/fork-version.sh)"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "resolved $tag (computed $computed)"
+
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l backend)
+          if [ -n "$unformatted" ]; then
+            echo "$unformatted"
+            echo "::error::gofmt found unformatted files"
+            exit 1
+          fi
+      - name: vet + build
+        run: |
+          go vet ./backend/...
+          go build -tags dashboard ./backend/...
+      - name: tests
+        run: env -u AUTH_TOKENS -u ADMIN_TOKEN go test ./backend/...
+
+  build:
+    needs: [version, gate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - {goos: linux,   goarch: amd64, ext: tar.gz}
+          - {goos: linux,   goarch: arm64, ext: tar.gz}
+          - {goos: darwin,  goarch: amd64, ext: tar.gz}
+          - {goos: darwin,  goarch: arm64, ext: tar.gz}
+          - {goos: windows, goarch: amd64, ext: zip}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -eu
+          mkdir -p out
+          bin=freebuff-proxy
+          [ "$GOOS" = windows ] && bin=freebuff-proxy.exe
+          go build -tags dashboard -trimpath \
+            -ldflags "-s -w -X main.version=$VERSION -X freebuff-proxy/backend/internal/cli/update.defaultReleasesRepo=$REPO" \
+            -o "out/$bin" ./backend/cmd/freebuff-proxy
+          # keep the executable bit explicit: the updater replaces a running
+          # binary and execs the extracted file
+          chmod 755 "out/$bin"
+      - name: package
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          EXT: ${{ matrix.ext }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -eu
+          bin=freebuff-proxy
+          [ "$GOOS" = windows ] && bin=freebuff-proxy.exe
+          asset="freebuff-proxy_${VERSION}_${GOOS}_${GOARCH}.${EXT}"
+          if [ "$EXT" = zip ]; then
+            (cd out && zip -q -r "../$asset" "$bin")
+          else
+            tar -C out -czf "$asset" "$bin"
+          fi
+          ls -l "$asset"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: asset-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: freebuff-proxy_*.*
+          if-no-files-found: error
+
+  publish:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: checksums + sanity
+        run: |
+          set -eu
+          cd dist
+          sha256sum freebuff-proxy_* > checksums.txt
+          cat checksums.txt
+          test "$(ls freebuff-proxy_* | wc -l)" -ge 5
+      - name: publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          set -eu
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release upload "$TAG" --repo "$REPO" --clobber dist/*
+          else
+            gh release create "$TAG" --repo "$REPO" --title "$TAG" \
+              --notes "Fork release $TAG — upstream base plus fork commits (tool-mapping guards, fork versioning/update channel). Built and published by GitHub Actions." \
+              dist/*
+          fi
+          gh release view "$TAG" --repo "$REPO" --json tagName,assets \
+            --jq '.tagName, (.assets[] | .name)'
