@@ -36,17 +36,29 @@ for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; d
   CGO_ENABLED=0 GOOS=$os GOARCH=$arch \
     go build -tags dashboard -trimpath -ldflags "-s -w -X main.version=$ver -X freebuff-proxy/backend/internal/cli/update.defaultReleasesRepo=$REPO" \
     -o "$out/$bin" ./backend/cmd/freebuff-proxy
-  if [ "$ext" = zip ]; then
-    if command -v zip >/dev/null 2>&1; then
-      ( cd "$out" && zip -q "freebuff-proxy_${ver}_${os}_${arch}.zip" "$bin" )
-    else
-      # git-bash on Windows often lacks `zip`; python3 is the portable fallback.
-      python -c "import sys,zipfile;z=zipfile.ZipFile(sys.argv[1],'w',zipfile.ZIP_DEFLATED);z.write(sys.argv[2],sys.argv[3]);z.close()" \
-        "$out/freebuff-proxy_${ver}_${os}_${arch}.zip" "$out/$bin" "$bin"
-    fi
-  else
-    tar -czf "$out/freebuff-proxy_${ver}_${os}_${arch}.tar.gz" -C "$out" "$bin"
-  fi
+  # Archive with an EXPLICIT 0755 mode: git-bash/MSYS tar on Windows writes
+  # 0644 entries, so a Linux user extracting the asset gets a non-executable
+  # binary (and `tar xzf && ./freebuff-proxy` fails). python's tarfile/zipfile
+  # set the mode deterministically on every host.
+  python - "$out" "$bin" "$ver" "$os" "$arch" "$ext" <<'PY'
+import os, sys, tarfile, zipfile
+out, bin_name, ver, goos, arch, ext = sys.argv[1:7]
+src = os.path.join(out, bin_name)
+base = "freebuff-proxy_%s_%s_%s" % (ver, goos, arch)
+if ext == "zip":
+    with zipfile.ZipFile(os.path.join(out, base + ".zip"), "w", zipfile.ZIP_DEFLATED) as z:
+        zi = zipfile.ZipInfo(bin_name)
+        zi.external_attr = 0o755 << 16  # unix mode in the zip external attrs
+        z.writestr(zi, open(src, "rb").read())
+else:
+    with tarfile.open(os.path.join(out, base + ".tar.gz"), "w:gz") as t:
+        ti = t.gettarinfo(src, arcname=bin_name)
+        ti.mode = 0o755
+        ti.uid = ti.gid = 0
+        ti.uname = ti.gname = "root"
+        with open(src, "rb") as fh:
+            t.addfile(ti, fh)
+PY
   rm -f "$out/$bin"
 done
 

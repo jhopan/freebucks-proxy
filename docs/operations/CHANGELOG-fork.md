@@ -3,6 +3,24 @@
 Catatan perubahan pada fork ini di atas upstream `trefeon/freebuff-proxy`.
 Rilis resmi tetap mengikuti upstream; hanya deviasi fork yang dicatat di sini.
 
+### Tambahan: cacat mode arsip pada rilis pertama
+
+Rilis pertama `v1.12.1.10` dibuat dengan `tar` dari git-bash/MSYS di Windows:
+entri arsipnya bermode 0644, jadi user Linux yang mengekstrak mendapat binary
+yang TIDAK bisa dieksekusi (`tar xzf && ./freebuff-proxy` -> Permission denied).
+`fork-release.sh` sekarang membuat tar.gz/zip lewat python `tarfile`/`zipfile`
+dengan mode 0755 eksplisit (uid/gid 0, uname/gname root, external_attr zip).
+Aset rilis diganti (release dihapus + dibuat ulang pada tag yang sama).
+
+Verifikasi setelah perbaikan, langsung dari aset rilis ke VPS:
+
+    sha256sum -c --ignore-missing checksums.txt   -> freebuff-proxy_1.12.1.10_linux_amd64.tar.gz: OK
+    tar xzf ... && ls -l freebuff-proxy           -> -rwxr-xr-x
+    ./freebuff-proxy -version                     -> freebuff-proxy 1.12.1.10
+    ./freebuff-proxy -update                      -> Latest release: v1.12.1.10 / Already up to date!
+    curl http://192.154.111.198:34570/healthz     -> 200
+    uji 32 tool Hermes -> deepseek                 -> 200 TOOLS-OK
+
 ## 2026-09-20 (4) - update menengok rilis fork sendiri
 
 ### Perubahan
