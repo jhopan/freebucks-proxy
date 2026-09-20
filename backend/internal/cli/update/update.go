@@ -36,10 +36,18 @@ const maxUpdateDownloadBytes = 64 << 20
 // maxUpdateDownloadBytes, but a gzip/zip member can decompress to far more.
 const maxUpdateArchiveEntryBytes = maxUpdateDownloadBytes
 
-// defaultReleasesURL is the GitHub API endpoint checked for the latest
-// release. FREEBUFF_UPDATE_API_URL overrides it so tests (and self-hosted
-// mirrors) can point -update at a fake release server.
-const defaultReleasesURL = "https://api.github.com/repos/trefeon/freebuff-proxy/releases/latest"
+// defaultReleasesRepo is the GitHub repo whose `releases/latest` is checked by
+// the update indicator and `-update`. Fork builds stamp their OWN repo at
+// build time (-X ...update.defaultReleasesRepo=<owner>/<repo>, see
+// `task build:fork`), so a fork tracks its own releases instead of upstream's.
+// FREEBUFF_UPDATE_API_URL overrides the whole URL at runtime (tests and
+// self-hosted mirrors point it at a fake release server).
+var defaultReleasesRepo = "trefeon/freebuff-proxy"
+
+// defaultReleasesURLFor builds the releases/latest endpoint for a repo slug.
+func defaultReleasesURLFor(repo string) string {
+	return "https://api.github.com/repos/" + repo + "/releases/latest"
+}
 
 type releaseAsset struct {
 	Name               string `json:"name"`
@@ -59,7 +67,7 @@ func githubReleasesURL() string {
 	if u := strings.TrimSpace(os.Getenv("FREEBUFF_UPDATE_API_URL")); u != "" {
 		return u
 	}
-	return defaultReleasesURL
+	return defaultReleasesURLFor(defaultReleasesRepo)
 }
 
 // isUpToDate reports whether the running version already matches the latest

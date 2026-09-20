@@ -3,6 +3,37 @@
 Catatan perubahan pada fork ini di atas upstream `trefeon/freebuff-proxy`.
 Rilis resmi tetap mengikuti upstream; hanya deviasi fork yang dicatat di sini.
 
+## 2026-09-20 (4) - update menengok rilis fork sendiri
+
+### Perubahan
+
+- **`update.defaultReleasesRepo`** (var, ldflags-stampable) menggantikan
+  `defaultReleasesURL` const. Build fork di-stamp ke repo kita, jadi `-update`
+  + indikator dashboard memeriksa rilis **jhopan/freebuff-proxy**, bukan rilis
+  upstream. Override runtime `FREEBUFF_UPDATE_API_URL` tetap berlaku.
+  Default upstream (`trefeon/freebuff-proxy`) tidak berubah.
+- **`scripts/fork-release.sh`** (`task release:fork`) - publish rilis fork:
+  build 5 target (linux/darwin amd64+arm64, windows amd64) dengan stempel versi
+  + repo, tulis `checksums.txt`, `gh release create` di fork. Nama aset
+  mengikuti konvensi GoReleaser karena itulah yang dicocokkan updater
+  (`<project>_<ver>_<os>_<arch>.tar.gz` dan `checksums.txt`).
+- **`scripts/fork-version.sh`** - saat HEAD tepat di tag (build rilis), versi =
+  tag itu sendiri (tanpa komponen `.0` tambahan).
+- **`task build:fork`** kini juga men-stamp repo rilis (var `FORK_REPO`).
+- Tes: `TestDefaultReleasesRepoStampable`.
+
+### Kenapa tidak memakai release.yml
+
+`.goreleaser.yml` upstream men-hardcode `release.github.owner: trefeon` dan
+GoReleaser menolak version 4 komponen (`1.12.1.10` bukan semver valid), jadi
+tag push di fork tidak bisa memakai jalur itu. Rilis fork lewat script.
+
+### Hasil uji
+
+- `go test ./backend/...` hijau.
+- Build ber-stempel: `-update` menyapa repo fork (404 saat rilis belum ada -
+  bukti stamp bekerja, sebelumnya langsung dapat v1.12.1 dari trefeon).
+
 ## 2026-09-20 (3) - versi fork + guard anti-downgrade di -update
 
 ### Perubahan

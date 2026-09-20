@@ -177,6 +177,15 @@ dotenv → static → live → SSE hash → store refresh.
   (atau `task build:fork`). Skema: `<tag upstream>.<jumlah-commit-fork>` —
   contoh `1.12.1.8`. Komponen tambahan membuat versi fork lebih tinggi dari
   rilis dasarnya tapi tetap lebih rendah dari rilis upstream berikutnya.
+- **Rilis fork + sumber update:** build fork di-stamp agar `-update` dan
+  indikator dashboard melihat rilis KITA
+  (`-X freebuff-proxy/backend/internal/cli/update.defaultReleasesRepo=jhopan/freebuff-proxy`,
+  sudah termasuk di `task build:fork`). Rilis fork dibuat dengan
+  `sh scripts/fork-release.sh` (`task release:fork`): build aset
+  `freebuff-proxy_<ver>_<os>_<arch>.tar.gz` + `checksums.txt`, lalu
+  `gh release create` di fork. `release.yml`/GoReleaser upstream TIDAK dipakai
+  untuk fork (owner `trefeon` di-hardcode + tag `X.Y.Z.<fork-rev>` bukan
+  semver valid untuk GoReleaser).
 - **Guard `-update`:** build versi-fork menolak memasang rilis yang lebih tua
   ("Refusing to downgrade: ..."). Override saat darurat:
   `FREEBUFF_UPDATE_ALLOW_DOWNGRADE=1`.

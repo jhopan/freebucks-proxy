@@ -21,4 +21,9 @@ if [ -z "$tag" ]; then
   exit 0
 fi
 rev=$(git rev-list --count "$tag"..HEAD)
-printf '%s.%s\n' "${tag#v}" "$rev"
+if [ "$rev" -eq 0 ]; then
+  # HEAD sits exactly on the tag (a released fork build): the tag IS the version.
+  printf '%s\n' "${tag#v}"
+else
+  printf '%s.%s\n' "${tag#v}" "$rev"
+fi

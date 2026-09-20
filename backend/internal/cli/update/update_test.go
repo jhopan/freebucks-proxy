@@ -770,15 +770,15 @@ func TestInstallUnixRollback(t *testing.T) {
 // TestGithubReleasesURLOverride pins the FREEBUFF_UPDATE_API_URL injection:
 // the override must win, the default must be unchanged when unset.
 func TestGithubReleasesURLOverride(t *testing.T) {
-	if got := githubReleasesURL(); got != defaultReleasesURL {
-		t.Errorf("githubReleasesURL() default = %q, want %q", got, defaultReleasesURL)
+	if got := githubReleasesURL(); got != defaultReleasesURLFor(defaultReleasesRepo) {
+		t.Errorf("githubReleasesURL() default = %q, want %q", got, defaultReleasesURLFor(defaultReleasesRepo))
 	}
 	t.Setenv("FREEBUFF_UPDATE_API_URL", "http://127.0.0.1:9999/releases/latest")
 	if got := githubReleasesURL(); got != "http://127.0.0.1:9999/releases/latest" {
 		t.Errorf("githubReleasesURL() with override = %q, want the override", got)
 	}
 	t.Setenv("FREEBUFF_UPDATE_API_URL", "  ")
-	if got := githubReleasesURL(); got != defaultReleasesURL {
+	if got := githubReleasesURL(); got != defaultReleasesURLFor(defaultReleasesRepo) {
 		t.Errorf("githubReleasesURL() with blank override = %q, want default", got)
 	}
 }
@@ -825,5 +825,18 @@ func TestAllowDowngradeEscapeHatch(t *testing.T) {
 	t.Setenv("FREEBUFF_UPDATE_ALLOW_DOWNGRADE", "")
 	if allowDowngrade() {
 		t.Error("allowDowngrade() = true with the override unset")
+	}
+}
+
+// TestDefaultReleasesRepoStampable pins that the release repo is a package
+// var (ldflags-stampable: -X ...update.defaultReleasesRepo=<slug>), so fork
+// builds track their own releases while the upstream default is unchanged.
+func TestDefaultReleasesRepoStampable(t *testing.T) {
+	if got, want := defaultReleasesURLFor(defaultReleasesRepo),
+		"https://api.github.com/repos/"+defaultReleasesRepo+"/releases/latest"; got != want {
+		t.Errorf("defaultReleasesURLFor(defaultReleasesRepo) = %q, want %q", got, want)
+	}
+	if got := defaultReleasesURLFor("someone/fork"); got != "https://api.github.com/repos/someone/fork/releases/latest" {
+		t.Errorf("defaultReleasesURLFor(someone/fork) = %q", got)
 	}
 }

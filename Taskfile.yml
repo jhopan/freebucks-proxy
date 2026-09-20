@@ -1,5 +1,8 @@
 version: '3'
 
+vars:
+  FORK_REPO: jhopan/freebuff-proxy
+
 tasks:
   default:
     desc: List all tasks
@@ -33,9 +36,14 @@ tasks:
       - go build -o bin/freebuff-proxy{{exeExt}} ./backend/cmd/freebuff-proxy
 
   build:fork:
-    desc: Compile the proxy with the fork version stamp (scripts/fork-version.sh -> X.Y.Z.<fork-rev>)
+    desc: Compile the proxy with the fork version + own-releases stamp (X.Y.Z.<fork-rev>, release repo = fork)
     cmds:
-      - go build -trimpath -ldflags "-s -w -X main.version=$(sh scripts/fork-version.sh)" -o bin/freebuff-proxy{{exeExt}} ./backend/cmd/freebuff-proxy
+      - go build -trimpath -ldflags "-s -w -X main.version=$(sh scripts/fork-version.sh) -X freebuff-proxy/backend/internal/cli/update.defaultReleasesRepo={{.FORK_REPO}}" -o bin/freebuff-proxy{{exeExt}} ./backend/cmd/freebuff-proxy
+
+  release:fork:
+    desc: Publish a fork GitHub release (assets + checksums.txt) that -update can consume
+    cmds:
+      - sh scripts/fork-release.sh
 
   test:fast:
     desc: Fast tier — all backend pkgs except pool+server+cmd entrypoints (seconds-scale lane default)
