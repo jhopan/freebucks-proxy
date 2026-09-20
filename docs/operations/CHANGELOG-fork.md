@@ -3,6 +3,39 @@
 Catatan perubahan pada fork ini di atas upstream `trefeon/freebuff-proxy`.
 Rilis resmi tetap mengikuti upstream; hanya deviasi fork yang dicatat di sini.
 
+## 2026-09-20 (3) - versi fork + guard anti-downgrade di -update
+
+### Perubahan
+
+- **`scripts/fork-version.sh`** (baru) - hitung versi build fork:
+  `<tag upstream vX.Y.Z>.<jumlah commit sejak tag>`, mis. **`1.12.1.8`**.
+  Dipakai saat build: `-ldflags "-s -w -X main.version=$(sh scripts/fork-version.sh)"`.
+- **`task build:fork`** (Taskfile) - build proxy dengan stempel versi fork.
+- **`backend/internal/cli/update/update.go`** - guard anti-downgrade:
+  `-update` menolak memasang rilis yang LEBIH TUA dari versi yang berjalan
+  (`Refusing to downgrade: running X is newer than latest release Y`).
+  Dulu `isUpToDate` hanya equality + `dev` selalu dianggap "bukan terbaru",
+  jadi build fork/dev bisa ditimpa rilis lama tanpa peringatan.
+  Override darurat: `FREEBUFF_UPDATE_ALLOW_DOWNGRADE=1`.
+- **`backend/internal/archtest/arch_test.go`** - matriks dependency diperluas
+  secara sadar: `internal/cli/update -> internal/updatecheck` (pembanding
+  versi numerik milik leaf updatecheck).
+- **Tes**: `TestShouldRefuseDowngrade` (9 kasus: fork > rilis dasar, rilis
+  berikutnya lebih baru, `dev`/kosong/tak-terparse tidak pernah menolak) +
+  `TestAllowDowngradeEscapeHatch`.
+
+### Alasan
+
+Build fork memuat fix yang belum tentu ada di rilis (mis. dedupe tool #655
+saat itu belum dirilis). Tanpa stempel versi + guard, `-update` bisa menimpa
+build fork dengan rilis lama dan mengembalikan bug yang sudah diperbaiki.
+
+### Hasil uji
+
+- `go test ./backend/...` hijau (termasuk archtest matriks).
+- `sh scripts/fork-version.sh` -> `1.12.1.8`; build lokal `-version` mencetak
+  `freebuff-proxy 1.12.1.8`.
+
 ## 2026-09-20 (2) - merge upstream: vendor 0.0.180 + fix TTFT
 
 ### Perubahan

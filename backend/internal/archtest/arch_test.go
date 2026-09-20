@@ -151,7 +151,12 @@ var allowed = map[string][]string{
 	},
 	"internal/cli/port":    {},
 	"internal/cli/setup":   {},
-	"internal/cli/update":  {},
+	"internal/cli/update": {
+		// Fork guard (jhopan/freebuff-proxy): -update refuses to install a
+		// release older than the running fork build (X.Y.Z.<fork-rev>).
+		// The numeric-component comparison is owned by updatecheck (leaf).
+		"internal/updatecheck",
+	},
 	"internal/cli/service": {},
 	"internal/cli/doctor": { // -doctor diagnostics
 		"internal/config",

@@ -21,6 +21,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"freebuff-proxy/backend/internal/updatecheck"
 )
 
 // maxUpdateDownloadBytes caps a single -update download body (release asset
@@ -66,6 +68,27 @@ func githubReleasesURL() string {
 // is exact equality — there is no semver ordering.
 func isUpToDate(currentVersion, latestTag string) bool {
 	return currentVersion != "dev" && (currentVersion == latestTag || "v"+currentVersion == latestTag)
+}
+
+// allowDowngrade reports whether the FREEBUFF_UPDATE_ALLOW_DOWNGRADE escape
+// hatch is set. Without it a build newer than the latest release refuses to
+// be replaced by that release.
+func allowDowngrade() bool {
+	v := strings.TrimSpace(os.Getenv("FREEBUFF_UPDATE_ALLOW_DOWNGRADE"))
+	return v == "1" || strings.EqualFold(v, "true")
+}
+
+// shouldRefuseDowngrade reports whether -update must NOT install latestTag
+// over currentVersion. Upstream releases are plain vX.Y.Z while a fork build
+// carries an extra numeric component (X.Y.Z.<fork-rev>, see
+// scripts/fork-version.sh), so vendored fork fixes would be silently rolled
+// back by the next `-update`. Comparison is numeric-component-wise
+// (updatecheck.CompareVersions): "dev" and unparsable versions never refuse.
+func shouldRefuseDowngrade(currentVersion, latestTag string) bool {
+	if currentVersion == "" || currentVersion == "dev" || latestTag == "" {
+		return false
+	}
+	return updatecheck.CompareVersions(latestTag, currentVersion) < 0
 }
 
 // platformAssetSuffix returns the release-asset filename suffix for the
@@ -170,6 +193,12 @@ func Run(version string) {
 	fmt.Printf("Latest release: %s\n", rel.TagName)
 	if isUpToDate(version, rel.TagName) {
 		fmt.Println("Already up to date!")
+		os.Exit(0)
+	}
+
+	if shouldRefuseDowngrade(version, rel.TagName) && !allowDowngrade() {
+		fmt.Printf("Refusing to downgrade: running %s is newer than latest release %s.\n", version, rel.TagName)
+		fmt.Println("This build carries fork fixes newer than that release; set FREEBUFF_UPDATE_ALLOW_DOWNGRADE=1 to override.")
 		os.Exit(0)
 	}
 

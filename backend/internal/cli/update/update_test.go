@@ -782,3 +782,48 @@ func TestGithubReleasesURLOverride(t *testing.T) {
 		t.Errorf("githubReleasesURL() with blank override = %q, want default", got)
 	}
 }
+
+// TestShouldRefuseDowngrade pins the fork guard: a fork build carries an
+// extra numeric component (X.Y.Z.<fork-rev>) so a plain upstream release must
+// not be installed over it. Ordering is numeric-component-wise.
+func TestShouldRefuseDowngrade(t *testing.T) {
+	cases := []struct {
+		name    string
+		current string
+		latest  string
+		want    bool
+	}{
+		{"fork build newer than its base release", "1.12.1.8", "v1.12.1", true},
+		{"next upstream release is genuinely newer", "1.12.1.8", "v1.12.2", false},
+		{"major bump is newer", "1.12.1.8", "v2.0.0", false},
+		{"exact release match (isUpToDate path)", "1.12.1", "v1.12.1", false},
+		{"fork rev above a later release still refuses", "1.12.1.3", "v1.12.1", true},
+		{"second fork component compares numerically", "1.12.1.10", "v1.12.1.2", true},
+		{"dev build never refuses", "dev", "v1.12.1", false},
+		{"empty current never refuses", "", "v1.12.1", false},
+		{"unparsable current never refuses", "abc", "v1.12.1", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldRefuseDowngrade(tc.current, tc.latest); got != tc.want {
+				t.Errorf("shouldRefuseDowngrade(%q, %q) = %v, want %v", tc.current, tc.latest, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAllowDowngradeEscapeHatch pins the operational override.
+func TestAllowDowngradeEscapeHatch(t *testing.T) {
+	t.Setenv("FREEBUFF_UPDATE_ALLOW_DOWNGRADE", "1")
+	if !allowDowngrade() {
+		t.Error("allowDowngrade() = false with FREEBUFF_UPDATE_ALLOW_DOWNGRADE=1")
+	}
+	t.Setenv("FREEBUFF_UPDATE_ALLOW_DOWNGRADE", "true")
+	if !allowDowngrade() {
+		t.Error("allowDowngrade() = false with FREEBUFF_UPDATE_ALLOW_DOWNGRADE=true")
+	}
+	t.Setenv("FREEBUFF_UPDATE_ALLOW_DOWNGRADE", "")
+	if allowDowngrade() {
+		t.Error("allowDowngrade() = true with the override unset")
+	}
+}

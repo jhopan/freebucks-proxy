@@ -32,6 +32,11 @@ tasks:
     cmds:
       - go build -o bin/freebuff-proxy{{exeExt}} ./backend/cmd/freebuff-proxy
 
+  build:fork:
+    desc: Compile the proxy with the fork version stamp (scripts/fork-version.sh -> X.Y.Z.<fork-rev>)
+    cmds:
+      - go build -trimpath -ldflags "-s -w -X main.version=$(sh scripts/fork-version.sh)" -o bin/freebuff-proxy{{exeExt}} ./backend/cmd/freebuff-proxy
+
   test:fast:
     desc: Fast tier — all backend pkgs except pool+server+cmd entrypoints (seconds-scale lane default)
     cmds:

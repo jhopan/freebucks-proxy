@@ -171,6 +171,15 @@ dotenv → static → live → SSE hash → store refresh.
   dari fork main → scp sebagai `freebuff-proxy.new*` → JANGAN timpa langsung:
   `cp -a freebuff-proxy freebuff-proxy.bak-<label>` dulu → swap → restart →
   healthz dari luar. Rollback = restore file `.bak-*`.
+- **Versi fork (wajib untuk build kita):** stamp versi saat build agar build
+  fork tidak terlihat sebagai `dev` dan tidak bisa diturunkan oleh `-update`:
+  `go build -trimpath -ldflags "-s -w -X main.version=$(sh scripts/fork-version.sh)"`
+  (atau `task build:fork`). Skema: `<tag upstream>.<jumlah-commit-fork>` —
+  contoh `1.12.1.8`. Komponen tambahan membuat versi fork lebih tinggi dari
+  rilis dasarnya tapi tetap lebih rendah dari rilis upstream berikutnya.
+- **Guard `-update`:** build versi-fork menolak memasang rilis yang lebih tua
+  ("Refusing to downgrade: ..."). Override saat darurat:
+  `FREEBUFF_UPDATE_ALLOW_DOWNGRADE=1`.
 - Fork Actions: workflow push-trigger kadang tidak jalan di fork; semua
   workflow inti punya `workflow_dispatch` — jalankan manual via
   `gh workflow run ci.yml -R jhopan/freebuff-proxy --ref main`.
