@@ -52,6 +52,28 @@ tag push di fork tidak bisa memakai jalur itu. Rilis fork lewat script.
 - Build ber-stempel: `-update` menyapa repo fork (404 saat rilis belum ada -
   bukti stamp bekerja, sebelumnya langsung dapat v1.12.1 dari trefeon).
 
+## 2026-09-20 (5) - upstream-drift hijau + test agent-loop lanjutan
+
+### Perubahan
+
+- **Label repo fork** `dependencies` + `anti-ban` dibuat. Penyebab `upstream-drift`
+  gagal BUKAN clone vendor, tapi `gh pr create --label ...` yang mati dengan
+  `could not add label: 'anti-ban' not found` lalu exit 1. Setelah label ada,
+  workflow `success` (tanpa mengubah file workflow).
+- **`backend/internal/convert/toolmap_agentloop_test.go`** (`TestAgentLoopContinuationTurn`)
+  - pin TURN KEDUA agent loop: transcript `tool_calls` memakai nama KLIEN
+  (hanya `tools[]` yang direname; transcript diteruskan verbatim supaya
+  korelasi `call_id`/nama milik klien tidak rusak), wire tools tetap unik,
+  dan kedua bentuk restore jalan (`run_terminal_command`->`terminal`,
+  `mcp__execute_code`->`execute_code`).
+
+### Hasil uji
+
+- `go test ./backend/...` hijau.
+- `upstream-drift` di fork: `success` (run 35484033880).
+- Workflow ini mem-push branch `chore/upstream-drift-data-*` /
+  `chore/upstream-wire-*` ke fork dan tidak membuka PR saat drift SAMA.
+
 ## 2026-09-20 (3) - versi fork + guard anti-downgrade di -update
 
 ### Perubahan
