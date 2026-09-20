@@ -9,12 +9,17 @@
 #   upstream v1.12.1 + 8 fork commits  ->  1.12.1.8
 #   upstream v1.12.2 released          ->  1.12.2  (newer than 1.12.1.8)
 #
+# Fork release tags are themselves 4-component (v1.12.1.10), so the lookup
+# EXCLUDES them: describing to a fork tag would report e.g. 1.12.1.10.<n>,
+# which updatecheck reads as OLDER than the upstream release it is based on.
+# Only plain upstream vX.Y.Z tags are anchors (AGENTS.md section 6).
+#
 # Stamp it into the binary with:
 #   go build -ldflags "-s -w -X main.version=$(scripts/fork-version.sh)" ...
 # (or `task build:fork`). Without the stamp the binary reports "dev".
 set -eu
 
-tag=$(git describe --tags --match 'v[0-9]*' --abbrev=0 HEAD 2>/dev/null || true)
+tag=$(git describe --tags --match 'v[0-9]*' --exclude 'v*.*.*.*' --abbrev=0 HEAD 2>/dev/null || true)
 if [ -z "$tag" ]; then
   # No version tag reachable (shallow clone): fall back to the module-less dev mark.
   echo dev
