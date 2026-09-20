@@ -43,6 +43,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      # The version anchor is the UPSTREAM release tag (vX.Y.Z), which lives on
+      # the upstream repo, not here: a fresh fork clone only carries the fork's
+      # own 4-component tags (which fork-version.sh deliberately excludes), so
+      # describe would fall back to "dev". Fetch the upstream tags first.
+      - name: fetch upstream tags (version anchor)
+        run: |
+          set -eu
+          git fetch --no-tags origin '+refs/heads/*:refs/remotes/origin/*'
+          git fetch --tags --force https://github.com/trefeon/freebuff-proxy.git '+refs/tags/v*:refs/tags/v*'
+          git tag -l 'v*' | tail -5
       - id: v
         run: |
           set -eu
