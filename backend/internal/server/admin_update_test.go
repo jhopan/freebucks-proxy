@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -106,33 +105,45 @@ func TestAdminUpdateRefusesDowngrade(t *testing.T) {
 }
 
 func TestAdminUpdateBusyWhileRunning(t *testing.T) {
-	// An updater that sleeps forces the in-flight flag to stay set; the
-	// second concurrent call must get 409 without running anything.
 	if os.PathSeparator == '\\' {
 		t.Skip("no sleep(5) on cmd.exe fake")
 	}
 	fakeUpdater(t, "sleep 2; echo 'SUCCESS: freebucks-proxy updated to v1.14.0.11!'; exit 0\n")
 	admin := &adminHandlers{logfunc: func() *slog.Logger { return slog.Default() }}
 
-	var firstCode int32
-	done := make(chan struct{})
+	done := make(chan int, 1)
 	go func() {
-		defer close(done)
 		req := httptest.NewRequest(http.MethodPost, "/admin/update", nil)
 		rec := httptest.NewRecorder()
 		admin.handleAdminUpdate(rec, req)
-		atomic.StoreInt32(&firstCode, int32(rec.Code))
+		done <- rec.Code
 	}()
-	// Wait until the first updater is actually running, then fire the second.
-	time.Sleep(300 * time.Millisecond)
-	req := httptest.NewRequest(http.MethodPost, "/admin/update", nil)
-	rec := httptest.NewRecorder()
-	admin.handleAdminUpdate(rec, req)
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("concurrent POST /admin/update = %d, want 409", rec.Code)
+
+	// Fire follow-up attempts until one lands on 409 (the first updater is
+	// in-flight) or the deadline passes. Polling beats a fixed sleep: CI
+	// scheduling may start the second request before the first one takes
+	// the update slot.
+	deadline := time.Now().Add(5 * time.Second)
+	var saw409 bool
+	for time.Now().Before(deadline) {
+		req := httptest.NewRequest(http.MethodPost, "/admin/update", nil)
+		rec := httptest.NewRecorder()
+		admin.handleAdminUpdate(rec, req)
+		if rec.Code == http.StatusConflict {
+			saw409 = true
+			break
+		}
+		select {
+		case code := <-done:
+			t.Fatalf("first update finished early with %d; busy window not observed", code)
+		default:
+		}
+		time.Sleep(25 * time.Millisecond)
 	}
-	<-done
-	if atomic.LoadInt32(&firstCode) != http.StatusOK {
-		t.Errorf("first update = %d, want 200", atomic.LoadInt32(&firstCode))
+	if !saw409 {
+		t.Fatal("concurrent POST /admin/update never returned 409")
+	}
+	if code := <-done; code != http.StatusOK {
+		t.Errorf("first update = %d, want 200", code)
 	}
 }
