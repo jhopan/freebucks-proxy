@@ -30,6 +30,7 @@
 
   let checking = $state(false);
   let restarting = $state(false);
+  let updating = $state(false);
   let checkMsg = $state("");
 
   async function loadVersion(force = false) {
@@ -72,6 +73,47 @@
     } finally {
       checking = false;
     }
+  }
+
+  function promptUpdate() {
+    confirmAction({
+      title: $tr("Install Update Now"),
+      message: $tr(
+        "Download the latest release, verify its checksum, and swap the binary? The gateway keeps serving until you restart. Sessions resume from disk after the restart.",
+      ),
+      confirmText: $tr("Install Update"),
+      tone: "warn",
+      onConfirm: async () => {
+        updating = true;
+        try {
+          const res = await postAPI(adminActions.update, {});
+          if (res.status === "updated") {
+            pushToast({
+              tone: "success",
+              title:
+                res.message ||
+                $tr("Update installed. Restart to run the new version."),
+            });
+            await loadVersion(true);
+          } else if (res.status === "up_to_date") {
+            checkMsg = res.message || $tr("Gateway is up to date.");
+            pushToast({ tone: "info", title: res.message || $tr("Already up to date.") });
+          } else {
+            pushToast({
+              tone: "error",
+              title: res.message || $tr("Update did not complete."),
+            });
+          }
+        } catch (err) {
+          pushToast({
+            tone: "error",
+            title: err.message || $tr("Failed to run the updater."),
+          });
+        } finally {
+          updating = false;
+        }
+      },
+    });
   }
 
   function promptRestart() {
@@ -186,6 +228,17 @@
         <RefreshCw size={14} />
         {$tr("Check for Updates")}
       </Button>
+      {#if versionInfo.has_update}
+        <Button
+          variant="primary"
+          size="sm"
+          onclick={promptUpdate}
+          loading={updating}
+        >
+          <ArrowUpCircle size={14} />
+          {$tr("Install Update")}
+        </Button>
+      {/if}
       {#if versionInfo.update_url}
         <a
           href={versionInfo.update_url}

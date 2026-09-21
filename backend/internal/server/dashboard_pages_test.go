@@ -206,7 +206,7 @@ func TestUpdateBadgeRendered(t *testing.T) {
 	}))
 	defer gh.Close()
 	tr := &rewriteTransport{target: gh.URL}
-	checker := updatecheck.New(updatecheck.DefaultRepo, &http.Client{Transport: tr})
+	checker := updatecheck.New(updatecheck.DefaultRepo(), &http.Client{Transport: tr})
 	srv := newServerCfg(t, mock, nil, func(s *Server) {
 		s.version = "v0.9.3"
 		s.updates = checker

@@ -39,7 +39,7 @@ for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; d
   bin=freebucks-proxy
   [ "$os" = windows ] && bin=freebucks-proxy.exe
   CGO_ENABLED=0 GOOS=$os GOARCH=$arch \
-    go build -tags dashboard -trimpath -ldflags "-s -w -X main.version=$ver -X freebucks-proxy/backend/internal/cli/update.defaultReleasesRepo=$REPO" \
+    go build -tags dashboard -trimpath -ldflags "-s -w -X main.version=$ver -X freebucks-proxy/backend/internal/cli/update.defaultReleasesRepo=$REPO -X freebucks-proxy/backend/internal/updatecheck.defaultRepo=$REPO" \
     -o "$out/$bin" ./backend/cmd/freebucks-proxy
   # Archive with an EXPLICIT 0755 mode: git-bash/MSYS tar on Windows writes
   # 0644 entries, so a Linux user extracting the asset gets a non-executable

@@ -53,6 +53,7 @@ export const adminActions = {
   tokenSwap: "/admin/tokens/swap",
   testAll: "/admin/tokens/test-all",
   restart: "/admin/restart",
+  update: "/admin/update",
 };
 
 /**
