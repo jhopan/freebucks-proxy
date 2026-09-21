@@ -312,3 +312,41 @@ menyusul bila perlu (ganti $bin + binaryName bersamaan).
   (build .10, stamp repo baru) bilang `Already up to date!`.
 - Remote lokal: `origin = https://github.com/jhopan/freebucks-proxy.git`.
 - Verifikasi Hermes tetap: 32 tool → 200 `HERMES-TOOLS-OK`.
+
+---
+
+## 2026-09-21 — one-click update dari dashboard + badge kanal sendiri (`v1.14.0.14`)
+
+### A. Badge update menunjuk kanal fork
+
+- `updatecheck.DefaultRepo` const → `var defaultRepo` + `DefaultRepo()`
+  (-X ldflags hanya bisa var). Build fork kini men-stamp
+  `internal/updatecheck.defaultRepo=jhopan/freebucks-proxy` di
+  `fork-release.sh` + `fork-release.yml` + `build:fork` (Taskfile.yml —
+  target ini ditambahkan kembali, hilang saat port sejarah).
+- Badge "Update Available" + link Releases di dashboard mengikuti repo
+  ter-stamp (`releaseURLFor(DefaultRepo())`).
+
+### B. Tombol "Install Update" (POST /admin/update)
+
+- Handler menjalankan updater sebagai SUBPROCESS (binary `-update`),
+  serialize via flag `updateRunning` (non-blocking → 409 saat sibuk),
+  klasifikasi: `updated` / `up_to_date` / `refused_downgrade` / `error`,
+  output lengkap di payload. Desain upstream dipertahankan: dashboard
+  TIDAK menukar binary in-process — restart tetap lewat tombol Restart
+  yang sudah ada (systemd meng-raise prosesnya).
+- Test `TestAdminUpdate*` dengan stub `updateRunner` (metod gate,
+  up_to_date, updated, downgrade-refused, error, busy-409 dengan channel
+  `started` supaya 409 deterministik — pelajaran: 300ms sleep kalah race
+  di CI, dan updateMu versi pertama malah deadlock).
+- Frontend: tombol muncul hanya saat `has_update`, confirm dialog,
+  toast + refresh versi; `adminActions.update` di paths.js; dist di-rebuild.
+
+### Verifikasi (lokal, TANPA deploy VPS)
+
+- `go test ./backend/...` 35 paket hijau; gofmt bersih; svelte-check 0 error;
+  `npm run build` dist baru.
+- Rilis `v1.14.0.14` sukses via Actions (6 aset, nama `freebucks-proxy_*`).
+- Pitfall versi: tag `v1.14.0.11/.12` GAGAL version-check karena
+  `fork-version.sh` menghitung commit sejak tag upstream — tag HARUS
+  `v$(sh scripts/fork-version.sh)` persis pada commit HEAD saat push.
