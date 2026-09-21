@@ -255,3 +255,44 @@ build fork dengan rilis lama dan mengembalikan bug yang sudah diperbaiki.
    turn paralel pada lane yang sama memakai satu sesi (lebih hemat daripada
    menambah lane).
 4. Detail pengukuran lengkap ada di `docs/operations/pool-tuning.md` §10.
+
+---
+
+## 2026-09-21 — port fork ke sejarah baru `freebucks-proxy` (upstream rewrite)
+
+### Konteks
+
+Upstream menulis ulang sejarah repo saat rename `freebuff-proxy -> freebucks-proxy`
+(#669, rilis `v1.14.0`): tag `v1.13.0` dipindah ke commit baru, `v1.13.0` lama
+tidak lagi ancestor dari `upstream/main`, sehingga `git merge` gagal
+(`no merge base`). Perbaikan Hermes (layer tool-mapping) tidak tersentuh —
+hash 8 file kritis identik sebelum/sesudah rewrite.
+
+### Migrasi (branch `migrate/freebucks-rename`, kemudian dijadikan `main`)
+
+- Basis: `upstream/main` baru (`82e98eee`, termasuk #673–#675).
+- Fork assets di-port kembali: 2 test pin toolset Hermes, `scripts/fork-version.sh`,
+  `scripts/fork-release.sh` (+ `workflow_dispatch` build path `./backend/cmd/freebucks-proxy`),
+  `.github/workflows/fork-release.yml`, guard `-update` (`defaultReleasesRepo`
+  stamp + `shouldRefuseDowngrade` + `FREEBUFF_UPDATE_ALLOW_DOWNGRADE`), edge
+  archtest `internal/cli/update -> internal/updatecheck`, `docs/operations/*`.
+- String nama binary/UA/self-updater mengikuti nama baru (`freebucks-proxy`).
+- `go test ./backend/...` hijau (35 paket). CI/lint/codeql hijau di `main`.
+- Perbaikan gofmt archtest (`ef9a570a`) + fix build path fork-release (`5f38eba9`).
+
+### Rilis + update
+
+- Tag `v1.14.0.6` GAGAL build (path `backend/cmd/freebuff-proxy` lama) — tag dihapus,
+  workflow diperbaiki, re-tag `v1.14.0.7` -> run `fork-release` sukses (6 aset).
+- VPS: backup `freebuff-proxy.bak-1.13.0.18` -> `-update` -> `SUCCESS: updated to
+  v1.14.0.7` -> restart -> `active`, `-version` = `1.14.0.7`, healthz 200.
+- Regresi Hermes: 32 tool -> HTTP 200 (`HERMES-TOOLS-OK`), 1.06 s.
+
+### Catatan binary name
+
+Isi arsip masih `freebuff-proxy` (nama file $bin di fork-release.sh),
+sedangkan `update.go` baru mencari `freebucks-proxy` — saat ini `extractBinaryFromArchive`
+menerima nama dari variabel `binaryName`; karena arsip rilis fork masih memakai
+`freebuff-proxy`, `-update` dari build `1.14.0.7` tetap menemukan binary (updater
+1.13.0.18 lama yang mencari `freebuff-proxy`). Perbaikan nama menyeluruh akan
+menyusul bila perlu (ganti $bin + binaryName bersamaan).
