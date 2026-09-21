@@ -126,7 +126,7 @@ jobs:
           [ "$GOOS" = windows ] && bin=freebuff-proxy.exe
           go build -tags dashboard -trimpath \
             -ldflags "-s -w -X main.version=$VERSION -X freebucks-proxy/backend/internal/cli/update.defaultReleasesRepo=$REPO" \
-            -o "out/$bin" ./backend/cmd/freebuff-proxy
+            -o "out/$bin" ./backend/cmd/freebucks-proxy
           # keep the executable bit explicit: the updater replaces a running
           # binary and execs the extracted file
           chmod 755 "out/$bin"
