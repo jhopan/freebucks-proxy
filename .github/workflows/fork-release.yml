@@ -122,8 +122,8 @@ jobs:
         run: |
           set -eu
           mkdir -p out
-          bin=freebuff-proxy
-          [ "$GOOS" = windows ] && bin=freebuff-proxy.exe
+          bin=freebucks-proxy
+          [ "$GOOS" = windows ] && bin=freebucks-proxy.exe
           go build -tags dashboard -trimpath \
             -ldflags "-s -w -X main.version=$VERSION -X freebucks-proxy/backend/internal/cli/update.defaultReleasesRepo=$REPO" \
             -o "out/$bin" ./backend/cmd/freebucks-proxy
@@ -138,9 +138,9 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: |
           set -eu
-          bin=freebuff-proxy
-          [ "$GOOS" = windows ] && bin=freebuff-proxy.exe
-          asset="freebuff-proxy_${VERSION}_${GOOS}_${GOARCH}.${EXT}"
+          bin=freebucks-proxy
+          [ "$GOOS" = windows ] && bin=freebucks-proxy.exe
+          asset="freebucks-proxy_${VERSION}_${GOOS}_${GOARCH}.${EXT}"
           if [ "$EXT" = zip ]; then
             (cd out && zip -q -r "../$asset" "$bin")
           else
@@ -150,7 +150,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: asset-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: freebuff-proxy_*.*
+          path: freebucks-proxy_*.*
           if-no-files-found: error
 
   publish:
@@ -166,9 +166,9 @@ jobs:
         run: |
           set -eu
           cd dist
-          sha256sum freebuff-proxy_* > checksums.txt
+          sha256sum freebucks-proxy_* > checksums.txt
           cat checksums.txt
-          test "$(ls freebuff-proxy_* | wc -l)" -ge 5
+          test "$(ls freebucks-proxy_* | wc -l)" -ge 5
       - name: publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

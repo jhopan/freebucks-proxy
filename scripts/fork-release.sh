@@ -36,8 +36,8 @@ for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; d
   arch=${target#*/}
   ext=tar.gz
   [ "$os" = windows ] && ext=zip
-  bin=freebuff-proxy
-  [ "$os" = windows ] && bin=freebuff-proxy.exe
+  bin=freebucks-proxy
+  [ "$os" = windows ] && bin=freebucks-proxy.exe
   CGO_ENABLED=0 GOOS=$os GOARCH=$arch \
     go build -tags dashboard -trimpath -ldflags "-s -w -X main.version=$ver -X freebucks-proxy/backend/internal/cli/update.defaultReleasesRepo=$REPO" \
     -o "$out/$bin" ./backend/cmd/freebucks-proxy
@@ -49,7 +49,7 @@ for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; d
 import os, sys, tarfile, zipfile
 out, bin_name, ver, goos, arch, ext = sys.argv[1:7]
 src = os.path.join(out, bin_name)
-base = "freebuff-proxy_%s_%s_%s" % (ver, goos, arch)
+base = "freebucks-proxy_%s_%s_%s" % (ver, goos, arch)
 if ext == "zip":
     with zipfile.ZipFile(os.path.join(out, base + ".zip"), "w", zipfile.ZIP_DEFLATED) as z:
         zi = zipfile.ZipInfo(bin_name)
@@ -67,7 +67,7 @@ PY
   rm -f "$out/$bin"
 done
 
-( cd "$out" && sha256sum freebuff-proxy_* > checksums.txt )
+( cd "$out" && sha256sum freebucks-proxy_* > checksums.txt )
 ls -l "$out"
 
 if [ "$DRY" -eq 1 ]; then
@@ -77,5 +77,5 @@ fi
 
 gh release create "$tag" --repo "$REPO" --title "$tag" \
   --notes "Fork release $tag (upstream base $(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo unknown), fork fixes on top)." \
-  "$out"/freebuff-proxy_* "$out"/checksums.txt
+  "$out"/freebucks-proxy_* "$out"/checksums.txt
 echo "released: https://github.com/$REPO/releases/tag/$tag"
