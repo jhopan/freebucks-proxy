@@ -2,34 +2,19 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
-	"time"
 )
 
-// fakeUpdater writes a shell script that prints a canned updater transcript
-// and returns the given exit code, then points executablePath at it.
-func fakeUpdater(t *testing.T, script string) {
+// withUpdater swaps updateRunner for a canned transcript and restores it.
+func withUpdater(t *testing.T, fn func() (string, error)) {
 	t.Helper()
-	dir := t.TempDir()
-	ext := ""
-	if os.PathSeparator == '\\' {
-		ext = ".bat"
-		script = "@echo off\r\n" + script
-	} else {
-		script = "#!/bin/sh\n" + script
-	}
-	p := filepath.Join(dir, "fake-updater"+ext)
-	if err := os.WriteFile(p, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake updater: %v", err)
-	}
-	old := executablePath
-	executablePath = func() (string, error) { return p, nil }
-	t.Cleanup(func() { executablePath = old })
+	old := updateRunner
+	updateRunner = fn
+	t.Cleanup(func() { updateRunner = old })
 }
 
 func TestAdminUpdateMethodNotAllowed(t *testing.T) {
@@ -43,7 +28,9 @@ func TestAdminUpdateMethodNotAllowed(t *testing.T) {
 }
 
 func TestAdminUpdateAlreadyUpToDate(t *testing.T) {
-	fakeUpdater(t, "echo 'freebucks-proxy self-updater'; echo 'Latest release: v1.14.0.10'; echo 'Already up to date!'; exit 0\n")
+	withUpdater(t, func() (string, error) {
+		return "freebucks-proxy self-updater\nLatest release: v1.14.0.10\nAlready up to date!", nil
+	})
 	admin := &adminHandlers{logfunc: func() *slog.Logger { return slog.Default() }}
 	req := httptest.NewRequest(http.MethodPost, "/admin/update", nil)
 	rec := httptest.NewRecorder()
@@ -64,7 +51,9 @@ func TestAdminUpdateAlreadyUpToDate(t *testing.T) {
 }
 
 func TestAdminUpdateSuccess(t *testing.T) {
-	fakeUpdater(t, "echo 'Checksum verified successfully [ok]'; echo 'SUCCESS: freebucks-proxy updated to v1.14.0.11!'; exit 0\n")
+	withUpdater(t, func() (string, error) {
+		return "Checksum verified successfully [ok]\nSUCCESS: freebucks-proxy updated to v1.14.0.12!", nil
+	})
 	admin := &adminHandlers{logfunc: func() *slog.Logger { return slog.Default() }}
 	req := httptest.NewRequest(http.MethodPost, "/admin/update", nil)
 	rec := httptest.NewRecorder()
@@ -75,17 +64,20 @@ func TestAdminUpdateSuccess(t *testing.T) {
 	var res struct {
 		OK     bool   `json:"ok"`
 		Status string `json:"status"`
+		Output string `json:"output"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&res); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if res.Status != "updated" || !res.OK {
-		t.Errorf("status = %q ok = %v, want updated/true", res.Status, res.OK)
+	if res.Status != "updated" || !res.OK || res.Output == "" {
+		t.Errorf("status = %q ok = %v output empty=%v, want updated/true/false", res.Status, res.OK, res.Output == "")
 	}
 }
 
 func TestAdminUpdateRefusesDowngrade(t *testing.T) {
-	fakeUpdater(t, "echo 'Refusing to downgrade: running 1.14.0.9 is newer than latest release v1.13.0.'; exit 0\n")
+	withUpdater(t, func() (string, error) {
+		return "Refusing to downgrade: running 1.14.0.9 is newer than latest release v1.13.0.", nil
+	})
 	admin := &adminHandlers{logfunc: func() *slog.Logger { return slog.Default() }}
 	req := httptest.NewRequest(http.MethodPost, "/admin/update", nil)
 	rec := httptest.NewRecorder()
@@ -104,46 +96,67 @@ func TestAdminUpdateRefusesDowngrade(t *testing.T) {
 	}
 }
 
-func TestAdminUpdateBusyWhileRunning(t *testing.T) {
-	if os.PathSeparator == '\\' {
-		t.Skip("no sleep(5) on cmd.exe fake")
+func TestAdminUpdateError(t *testing.T) {
+	withUpdater(t, func() (string, error) {
+		return "download failed", errors.New("boom")
+	})
+	admin := &adminHandlers{logfunc: func() *slog.Logger { return slog.Default() }}
+	req := httptest.NewRequest(http.MethodPost, "/admin/update", nil)
+	rec := httptest.NewRecorder()
+	admin.handleAdminUpdate(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("POST /admin/update = %d, want 500: %s", rec.Code, rec.Body.String())
 	}
-	fakeUpdater(t, "sleep 2; echo 'SUCCESS: freebucks-proxy updated to v1.14.0.11!'; exit 0\n")
+}
+
+func TestAdminUpdateBusyWhileRunning(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	withUpdater(t, func() (string, error) {
+		// Signal that the first handler took the slot and is now
+		// parked inside the runner — the 409 window is open.
+		close(started)
+		<-release
+		return "SUCCESS: freebucks-proxy updated to v1.14.0.12!", nil
+	})
 	admin := &adminHandlers{logfunc: func() *slog.Logger { return slog.Default() }}
 
-	done := make(chan int, 1)
+	// First call takes the slot and blocks inside the (fake) updater.
+	firstDone := make(chan int, 1)
 	go func() {
 		req := httptest.NewRequest(http.MethodPost, "/admin/update", nil)
 		rec := httptest.NewRecorder()
 		admin.handleAdminUpdate(rec, req)
-		done <- rec.Code
+		firstDone <- rec.Code
 	}()
+	select {
+	case <-started:
+	case code := <-firstDone:
+		t.Fatalf("first update finished without parking (%d); busy window untestable", code)
+	}
 
-	// Fire follow-up attempts until one lands on 409 (the first updater is
-	// in-flight) or the deadline passes. Polling beats a fixed sleep: CI
-	// scheduling may start the second request before the first one takes
-	// the update slot.
-	deadline := time.Now().Add(5 * time.Second)
-	var saw409 bool
-	for time.Now().Before(deadline) {
-		req := httptest.NewRequest(http.MethodPost, "/admin/update", nil)
-		rec := httptest.NewRecorder()
-		admin.handleAdminUpdate(rec, req)
-		if rec.Code == http.StatusConflict {
-			saw409 = true
-			break
-		}
-		select {
-		case code := <-done:
-			t.Fatalf("first update finished early with %d; busy window not observed", code)
-		default:
-		}
-		time.Sleep(25 * time.Millisecond)
+	// Second call must get 409 while the first is parked in the runner.
+	req := httptest.NewRequest(http.MethodPost, "/admin/update", nil)
+	rec := httptest.NewRecorder()
+	admin.handleAdminUpdate(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("concurrent POST /admin/update = %d, want 409: %s", rec.Code, rec.Body.String())
 	}
-	if !saw409 {
-		t.Fatal("concurrent POST /admin/update never returned 409")
-	}
-	if code := <-done; code != http.StatusOK {
+
+	// Release the first; it completes with 200 updated.
+	close(release)
+	if code := <-firstDone; code != http.StatusOK {
 		t.Errorf("first update = %d, want 200", code)
+	}
+
+	// Slot freed: a third call works again.
+	withUpdater(t, func() (string, error) {
+		return "Already up to date!", nil
+	})
+	req3 := httptest.NewRequest(http.MethodPost, "/admin/update", nil)
+	rec3 := httptest.NewRecorder()
+	admin.handleAdminUpdate(rec3, req3)
+	if rec3.Code != http.StatusOK {
+		t.Fatalf("POST after completion = %d, want 200", rec3.Code)
 	}
 }

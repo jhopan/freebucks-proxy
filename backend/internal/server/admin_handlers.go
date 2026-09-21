@@ -108,14 +108,34 @@ func (a *adminHandlers) handleAdminRestart(w http.ResponseWriter, r *http.Reques
 // A var so tests can point it at a fake updater.
 var executablePath = os.Executable
 
+// updateRunner runs one updater pass and returns (output, err). A var so
+// tests replace the subprocess with a canned transcript (the real impl spawns
+// the binary's own -update; update.Run exits the process at its conclusion,
+// so in-process reuse is a dead end).
+var updateRunner = runUpdaterSubprocess
+
+// runUpdaterSubprocess is the default updateRunner: it spawns the running
+// executable with -update in its own process group, bounded by 10 minutes,
+// and captures the full combined output.
+func runUpdaterSubprocess() (string, error) {
+	exe, err := executablePath()
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, exe, "-update")
+	out, err := cmd.CombinedOutput()
+	return strings.TrimSpace(string(out)), err
+}
+
 func (a *adminHandlers) handleAdminUpdate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	a.updateMu.Lock()
-	defer a.updateMu.Unlock()
 	// One at a time: the updater replaces the binary under our feet.
+	// Non-blocking: a second click while one runs gets 409 immediately.
 	if !a.updateTry() {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)
@@ -128,19 +148,9 @@ func (a *adminHandlers) handleAdminUpdate(w http.ResponseWriter, r *http.Request
 	}
 	defer a.updateDone()
 
-	exe, err := executablePath()
-	if err != nil {
-		a.updateJSON(w, http.StatusInternalServerError, "cannot resolve executable: "+err.Error(), "error", "")
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
-	defer cancel()
-	// Dedicated process group so the updater cannot inherit our signal set:
-	// SIGINT to the dashboard would kill the half-installed update.
-	cmd := exec.CommandContext(ctx, exe, "-update")
-	out, err := cmd.CombinedOutput()
-	output := strings.TrimSpace(string(out))
-	a.logfunc().Info("admin update attempt via dashboard", "remote", remoteHost(r), "exit", cmd.ProcessState.ExitCode(), "output", output)
+	// One runner at a time is enforced by updateMu; a second click while
+	// one runs is a 409 (updateTry/updateDone below).
+	output, err := updateRunner()
 
 	switch {
 	case err == nil && strings.Contains(output, "Already up to date"):
