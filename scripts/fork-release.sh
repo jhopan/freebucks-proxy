@@ -16,7 +16,7 @@
 # Requires: gh authenticated for the fork repo, plus go + tar + sha256sum.
 set -eu
 
-REPO=${FORK_RELEASES_REPO:-jhopan/freebuff-proxy}
+REPO=${FORK_RELEASES_REPO:-jhopan/freebucks-proxy}
 DRY=0
 [ "${1:-}" = "--dry-run" ] && DRY=1
 
