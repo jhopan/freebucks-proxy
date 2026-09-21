@@ -21,6 +21,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"freebucks-proxy/backend/internal/updatecheck"
 )
 
 // maxUpdateDownloadBytes caps a single -update download body (release asset
@@ -34,10 +36,18 @@ const maxUpdateDownloadBytes = 64 << 20
 // maxUpdateDownloadBytes, but a gzip/zip member can decompress to far more.
 const maxUpdateArchiveEntryBytes = maxUpdateDownloadBytes
 
-// defaultReleasesURL is the GitHub API endpoint checked for the latest
-// release. FREEBUFF_UPDATE_API_URL overrides it so tests (and self-hosted
-// mirrors) can point -update at a fake release server.
-const defaultReleasesURL = "https://api.github.com/repos/trefeon/freebucks-proxy/releases/latest"
+// defaultReleasesRepo is the GitHub repo whose `releases/latest` is checked by
+// the update indicator and `-update`. Fork builds stamp their OWN repo at
+// build time (-X ...update.defaultReleasesRepo=<owner>/<repo>, see
+// `task build:fork`), so a fork tracks its own releases instead of upstream's.
+// FREEBUFF_UPDATE_API_URL overrides the whole URL at runtime (tests and
+// self-hosted mirrors point it at a fake release server).
+var defaultReleasesRepo = "trefeon/freebucks-proxy"
+
+// defaultReleasesURLFor builds the releases/latest endpoint for a repo slug.
+func defaultReleasesURLFor(repo string) string {
+	return "https://api.github.com/repos/" + repo + "/releases/latest"
+}
 
 type releaseAsset struct {
 	Name               string `json:"name"`
@@ -57,7 +67,7 @@ func githubReleasesURL() string {
 	if u := strings.TrimSpace(os.Getenv("FREEBUFF_UPDATE_API_URL")); u != "" {
 		return u
 	}
-	return defaultReleasesURL
+	return defaultReleasesURLFor(defaultReleasesRepo)
 }
 
 // isUpToDate reports whether the running version already matches the latest
@@ -66,6 +76,27 @@ func githubReleasesURL() string {
 // is exact equality — there is no semver ordering.
 func isUpToDate(currentVersion, latestTag string) bool {
 	return currentVersion != "dev" && (currentVersion == latestTag || "v"+currentVersion == latestTag)
+}
+
+// allowDowngrade reports whether the FREEBUFF_UPDATE_ALLOW_DOWNGRADE escape
+// hatch is set. Without it a build newer than the latest release refuses to
+// be replaced by that release.
+func allowDowngrade() bool {
+	v := strings.TrimSpace(os.Getenv("FREEBUFF_UPDATE_ALLOW_DOWNGRADE"))
+	return v == "1" || strings.EqualFold(v, "true")
+}
+
+// shouldRefuseDowngrade reports whether -update must NOT install latestTag
+// over currentVersion. Upstream releases are plain vX.Y.Z while a fork build
+// carries an extra numeric component (X.Y.Z.<fork-rev>, see
+// scripts/fork-version.sh), so vendored fork fixes would be silently rolled
+// back by the next `-update`. Comparison is numeric-component-wise
+// (updatecheck.CompareVersions): "dev" and unparsable versions never refuse.
+func shouldRefuseDowngrade(currentVersion, latestTag string) bool {
+	if currentVersion == "" || currentVersion == "dev" || latestTag == "" {
+		return false
+	}
+	return updatecheck.CompareVersions(latestTag, currentVersion) < 0
 }
 
 // platformAssetSuffix returns the release-asset filename suffix for the
@@ -170,6 +201,12 @@ func Run(version string) {
 	fmt.Printf("Latest release: %s\n", rel.TagName)
 	if isUpToDate(version, rel.TagName) {
 		fmt.Println("Already up to date!")
+		os.Exit(0)
+	}
+
+	if shouldRefuseDowngrade(version, rel.TagName) && !allowDowngrade() {
+		fmt.Printf("Refusing to downgrade: running %s is newer than latest release %s.\n", version, rel.TagName)
+		fmt.Println("This build carries fork fixes newer than that release; set FREEBUFF_UPDATE_ALLOW_DOWNGRADE=1 to override.")
 		os.Exit(0)
 	}
 

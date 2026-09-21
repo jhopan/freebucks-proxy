@@ -23,8 +23,8 @@ import (
 
 func TestInstallUnixAtomicSwap(t *testing.T) {
 	dir := t.TempDir()
-	execPath := filepath.Join(dir, "freebucks-proxy")
-	newPath := filepath.Join(dir, "freebucks-proxy.new")
+	execPath := filepath.Join(dir, "freebuff-proxy")
+	newPath := filepath.Join(dir, "freebuff-proxy.new")
 	if err := os.WriteFile(execPath, []byte("old-binary"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -53,8 +53,8 @@ func TestInstallUnixAtomicSwap(t *testing.T) {
 
 func TestInstallUnixFailsWhenOldBinaryGone(t *testing.T) {
 	dir := t.TempDir()
-	execPath := filepath.Join(dir, "freebucks-proxy")
-	newPath := filepath.Join(dir, "freebucks-proxy.new")
+	execPath := filepath.Join(dir, "freebuff-proxy")
+	newPath := filepath.Join(dir, "freebuff-proxy.new")
 	if err := os.WriteFile(newPath, []byte("new-binary"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -70,8 +70,8 @@ func TestInstallUnixFailsWhenOldBinaryGone(t *testing.T) {
 }
 
 func TestWindowsUpdateScript(t *testing.T) {
-	exe := `C:\tools\freebucks proxy\freebucks-proxy.exe`
-	tmp := `C:\tools\freebucks proxy\freebucks-proxy.exe.tmp-123`
+	exe := `C:\tools\freebuff proxy\freebuff-proxy.exe`
+	tmp := `C:\tools\freebuff proxy\freebuff-proxy.exe.tmp-123`
 	script := windowsUpdateScript(exe, tmp, 4242)
 
 	for _, want := range []string{
@@ -104,8 +104,8 @@ func TestWindowsUpdateScriptRunsAndSwaps(t *testing.T) {
 		t.Skip("Windows-only deferred swap")
 	}
 	dir := t.TempDir()
-	execPath := filepath.Join(dir, "freebucks-proxy.exe")
-	tmpPath := filepath.Join(dir, "freebucks-proxy.exe.tmp-123")
+	execPath := filepath.Join(dir, "freebuff-proxy.exe")
+	tmpPath := filepath.Join(dir, "freebuff-proxy.exe.tmp-123")
 	if err := os.WriteFile(execPath, []byte("old-binary"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -165,8 +165,8 @@ func TestWindowsUpdateScriptDefersSwapUntilParentExits(t *testing.T) {
 		t.Skip("Windows-only deferred swap")
 	}
 	dir := t.TempDir()
-	execPath := filepath.Join(dir, "freebucks-proxy.exe")
-	tmpPath := filepath.Join(dir, "freebucks-proxy.exe.tmp-123")
+	execPath := filepath.Join(dir, "freebuff-proxy.exe")
+	tmpPath := filepath.Join(dir, "freebuff-proxy.exe.tmp-123")
 	if err := os.WriteFile(execPath, []byte("old-binary"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +258,7 @@ func TestVerifyChecksumFetchFailureAborts(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	err := verifyChecksum(context.Background(), &http.Client{Timeout: 5 * time.Second}, srv.URL+"/checksums.txt", "freebucks-proxy_linux_amd64.tar.gz", []byte("asset-bytes"))
+	err := verifyChecksum(context.Background(), &http.Client{Timeout: 5 * time.Second}, srv.URL+"/checksums.txt", "freebuff-proxy_linux_amd64.tar.gz", []byte("asset-bytes"))
 	if err == nil {
 		t.Fatal("verifyChecksum succeeded, want error when checksums.txt fetch fails")
 		return
@@ -271,7 +271,7 @@ func TestVerifyChecksumFetchFailureAborts(t *testing.T) {
 func TestVerifyChecksumMatchAndMismatch(t *testing.T) {
 	assetBytes := []byte("asset-bytes")
 	sum := sha256.Sum256(assetBytes)
-	checksums := hex.EncodeToString(sum[:]) + "  freebucks-proxy_linux_amd64.tar.gz\n"
+	checksums := hex.EncodeToString(sum[:]) + "  freebuff-proxy_linux_amd64.tar.gz\n"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(checksums))
 	}))
@@ -279,7 +279,7 @@ func TestVerifyChecksumMatchAndMismatch(t *testing.T) {
 
 	client := &http.Client{Timeout: 5 * time.Second}
 	url := srv.URL + "/checksums.txt"
-	assetFilename := "freebucks-proxy_linux_amd64.tar.gz"
+	assetFilename := "freebuff-proxy_linux_amd64.tar.gz"
 
 	if err := verifyChecksum(context.Background(), client, url, assetFilename, assetBytes); err != nil {
 		t.Fatalf("verifyChecksum(matching) = %v, want nil", err)
@@ -296,7 +296,7 @@ func TestVerifyChecksumMatchAndMismatch(t *testing.T) {
 // swap is reported exactly once on the next -update invocation.
 func TestReportUpdateResultMarkerReportsAndDeletes(t *testing.T) {
 	dir := t.TempDir()
-	exe := filepath.Join(dir, "freebucks-proxy.exe")
+	exe := filepath.Join(dir, "freebuff-proxy.exe")
 	marker := updateResultMarker(exe)
 
 	// FAILED case: the previous deferred swap did not complete.
@@ -444,7 +444,7 @@ func releaseArchiveBytes(t *testing.T, ext, entryName string, content []byte) []
 
 func TestExtractBinaryFromArchive(t *testing.T) {
 	want := []byte("binary-bytes-v9.9.9")
-	const binaryName = "freebucks-proxy"
+	const binaryName = "freebuff-proxy"
 	tests := []struct {
 		name      string
 		ext       string
@@ -466,10 +466,10 @@ func TestExtractBinaryFromArchive(t *testing.T) {
 		},
 		{
 			// Goreleaser archives nest the binary under a versioned dir:
-			// freebucks-proxy_9.9.9_linux_amd64/freebucks-proxy
+			// freebuff-proxy_9.9.9_linux_amd64/freebuff-proxy
 			name:      "goreleaser nested layout",
 			ext:       ".tar.gz",
-			entryName: "freebucks-proxy_9.9.9_linux_amd64/" + binaryName,
+			entryName: "freebuff-proxy_9.9.9_linux_amd64/" + binaryName,
 			wantBytes: want,
 		},
 		{
@@ -516,7 +516,7 @@ func TestExtractBinaryFromArchive(t *testing.T) {
 // production path for both archive formats with a cap+1 entry of zeros
 // (highly compressible, so the archives stay small).
 func TestExtractBinaryFromArchiveOversizedEntry(t *testing.T) {
-	const binaryName = "freebucks-proxy"
+	const binaryName = "freebuff-proxy"
 	for _, ext := range []string{".zip", ".tar.gz"} {
 		t.Run(ext, func(t *testing.T) {
 			archive := releaseArchiveBytes(t, ext, binaryName, make([]byte, maxUpdateArchiveEntryBytes+1))
@@ -539,9 +539,9 @@ func TestReleaseJSONDecodeAndAssetMatch(t *testing.T) {
 	releaseJSON := `{
 		"tag_name": "v9.9.9",
 		"assets": [
-			{"name": "freebucks-proxy_9.9.9_linux_amd64.tar.gz", "browser_download_url": "https://cdn.example/fp_linux_amd64.tar.gz"},
-			{"name": "freebucks-proxy_9.9.9_linux_arm64.tar.gz", "browser_download_url": "https://cdn.example/fp_linux_arm64.tar.gz"},
-			{"name": "freebucks-proxy_9.9.9_windows_amd64.zip", "browser_download_url": "https://cdn.example/fp_windows_amd64.zip"},
+			{"name": "freebuff-proxy_9.9.9_linux_amd64.tar.gz", "browser_download_url": "https://cdn.example/fp_linux_amd64.tar.gz"},
+			{"name": "freebuff-proxy_9.9.9_linux_arm64.tar.gz", "browser_download_url": "https://cdn.example/fp_linux_arm64.tar.gz"},
+			{"name": "freebuff-proxy_9.9.9_windows_amd64.zip", "browser_download_url": "https://cdn.example/fp_windows_amd64.zip"},
 			{"name": "checksums.txt", "browser_download_url": "https://cdn.example/checksums.txt"}
 		]
 	}`
@@ -558,7 +558,7 @@ func TestReleaseJSONDecodeAndAssetMatch(t *testing.T) {
 	if !ok {
 		t.Fatal("matchReleaseAssets(linux/amd64) ok = false, want true")
 	}
-	if assetName != "freebucks-proxy_9.9.9_linux_amd64.tar.gz" {
+	if assetName != "freebuff-proxy_9.9.9_linux_amd64.tar.gz" {
 		t.Errorf("assetName = %q, want the linux amd64 tar.gz", assetName)
 	}
 	if !strings.HasSuffix(assetURL, ".tar.gz") {
@@ -573,7 +573,7 @@ func TestReleaseJSONDecodeAndAssetMatch(t *testing.T) {
 	if !ok {
 		t.Fatal("matchReleaseAssets(windows/amd64) ok = false, want true")
 	}
-	if assetName != "freebucks-proxy_9.9.9_windows_amd64.zip" {
+	if assetName != "freebuff-proxy_9.9.9_windows_amd64.zip" {
 		t.Errorf("assetName = %q, want the windows amd64 zip", assetName)
 	}
 	if !strings.HasSuffix(assetURL, ".zip") {
@@ -632,7 +632,7 @@ func TestRequireChecksumsFailsClosed(t *testing.T) {
 
 func TestMatchReleaseAssetsMissingChecksums(t *testing.T) {
 	assets := []releaseAsset{
-		{Name: "freebucks-proxy_9.9.9_linux_amd64.tar.gz", BrowserDownloadURL: "https://cdn.example/a.tar.gz"},
+		{Name: "freebuff-proxy_9.9.9_linux_amd64.tar.gz", BrowserDownloadURL: "https://cdn.example/a.tar.gz"},
 	}
 	_, _, checksumURL, ok := matchReleaseAssets(assets, "linux", "amd64")
 	if !ok {
@@ -658,37 +658,37 @@ func TestVerifyChecksumFilenameBinding(t *testing.T) {
 	}{
 		{
 			name:          "hash and filename match",
-			checksums:     goodHash + "  freebucks-proxy_linux_amd64.tar.gz\n",
-			assetFilename: "freebucks-proxy_linux_amd64.tar.gz",
+			checksums:     goodHash + "  freebuff-proxy_linux_amd64.tar.gz\n",
+			assetFilename: "freebuff-proxy_linux_amd64.tar.gz",
 		},
 		{
 			name:          "goreleaser two-space format",
-			checksums:     goodHash + "  freebucks-proxy_9.9.9_linux_amd64.tar.gz\n",
-			assetFilename: "freebucks-proxy_9.9.9_linux_amd64.tar.gz",
+			checksums:     goodHash + "  freebuff-proxy_9.9.9_linux_amd64.tar.gz\n",
+			assetFilename: "freebuff-proxy_9.9.9_linux_amd64.tar.gz",
 		},
 		{
 			name:          "sha256sum star prefix tolerated",
-			checksums:     goodHash + " *freebucks-proxy_linux_amd64.tar.gz\n",
-			assetFilename: "freebucks-proxy_linux_amd64.tar.gz",
+			checksums:     goodHash + " *freebuff-proxy_linux_amd64.tar.gz\n",
+			assetFilename: "freebuff-proxy_linux_amd64.tar.gz",
 		},
 		{
 			// S6 regression: the SAME hash bound to a DIFFERENT file must
 			// not vouch for this asset.
 			name:          "same hash different filename rejected",
-			checksums:     goodHash + "  freebucks-proxy_linux_arm64.tar.gz\n",
-			assetFilename: "freebucks-proxy_linux_amd64.tar.gz",
+			checksums:     goodHash + "  freebuff-proxy_linux_arm64.tar.gz\n",
+			assetFilename: "freebuff-proxy_linux_amd64.tar.gz",
 			wantErr:       true,
 		},
 		{
 			name:          "hash only in a different-filename line still fails",
-			checksums:     "0000000000000000000000000000000000000000000000000000000000000000  freebucks-proxy_linux_amd64.tar.gz\n" + goodHash + "  other-file.bin\n",
-			assetFilename: "freebucks-proxy_linux_amd64.tar.gz",
+			checksums:     "0000000000000000000000000000000000000000000000000000000000000000  freebuff-proxy_linux_amd64.tar.gz\n" + goodHash + "  other-file.bin\n",
+			assetFilename: "freebuff-proxy_linux_amd64.tar.gz",
 			wantErr:       true,
 		},
 		{
 			name:          "wrong hash with right filename",
-			checksums:     "0000000000000000000000000000000000000000000000000000000000000000  freebucks-proxy_linux_amd64.tar.gz\n",
-			assetFilename: "freebucks-proxy_linux_amd64.tar.gz",
+			checksums:     "0000000000000000000000000000000000000000000000000000000000000000  freebuff-proxy_linux_amd64.tar.gz\n",
+			assetFilename: "freebuff-proxy_linux_amd64.tar.gz",
 			wantErr:       true,
 		},
 	}
@@ -720,12 +720,12 @@ func TestWinBase(t *testing.T) {
 	tests := []struct {
 		in, want string
 	}{
-		{`C:\tools\freebucks-proxy.exe`, "freebucks-proxy.exe"},
-		{`C:\tools\freebucks proxy\freebucks-proxy.exe.tmp-123`, "freebucks-proxy.exe.tmp-123"},
-		{"freebucks-proxy.exe", "freebucks-proxy.exe"},
-		{"tools/freebucks-proxy", "freebucks-proxy"},
-		{`C:\Users\张三\freebucks-proxy.exe`, "freebucks-proxy.exe"},
-		{"/usr/local/bin/freebucks-proxy", "freebucks-proxy"},
+		{`C:\tools\freebuff-proxy.exe`, "freebuff-proxy.exe"},
+		{`C:\tools\freebuff proxy\freebuff-proxy.exe.tmp-123`, "freebuff-proxy.exe.tmp-123"},
+		{"freebuff-proxy.exe", "freebuff-proxy.exe"},
+		{"tools/freebuff-proxy", "freebuff-proxy"},
+		{`C:\Users\张三\freebuff-proxy.exe`, "freebuff-proxy.exe"},
+		{"/usr/local/bin/freebuff-proxy", "freebuff-proxy"},
 	}
 	for _, tt := range tests {
 		if got := winBase(tt.in); got != tt.want {
@@ -742,10 +742,10 @@ func TestWinBase(t *testing.T) {
 // the executable missing.
 func TestInstallUnixRollback(t *testing.T) {
 	dir := t.TempDir()
-	execPath := filepath.Join(dir, "freebucks-proxy")
+	execPath := filepath.Join(dir, "freebuff-proxy")
 	// The temp file does NOT exist: the first rename (exec → .old) succeeds,
 	// the second (missing temp → exec) fails, triggering the rollback.
-	missingTemp := filepath.Join(dir, "freebucks-proxy.tmp-999")
+	missingTemp := filepath.Join(dir, "freebuff-proxy.tmp-999")
 	if err := os.WriteFile(execPath, []byte("old-binary"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -770,15 +770,73 @@ func TestInstallUnixRollback(t *testing.T) {
 // TestGithubReleasesURLOverride pins the FREEBUFF_UPDATE_API_URL injection:
 // the override must win, the default must be unchanged when unset.
 func TestGithubReleasesURLOverride(t *testing.T) {
-	if got := githubReleasesURL(); got != defaultReleasesURL {
-		t.Errorf("githubReleasesURL() default = %q, want %q", got, defaultReleasesURL)
+	if got := githubReleasesURL(); got != defaultReleasesURLFor(defaultReleasesRepo) {
+		t.Errorf("githubReleasesURL() default = %q, want %q", got, defaultReleasesURLFor(defaultReleasesRepo))
 	}
 	t.Setenv("FREEBUFF_UPDATE_API_URL", "http://127.0.0.1:9999/releases/latest")
 	if got := githubReleasesURL(); got != "http://127.0.0.1:9999/releases/latest" {
 		t.Errorf("githubReleasesURL() with override = %q, want the override", got)
 	}
 	t.Setenv("FREEBUFF_UPDATE_API_URL", "  ")
-	if got := githubReleasesURL(); got != defaultReleasesURL {
+	if got := githubReleasesURL(); got != defaultReleasesURLFor(defaultReleasesRepo) {
 		t.Errorf("githubReleasesURL() with blank override = %q, want default", got)
+	}
+}
+
+// TestShouldRefuseDowngrade pins the fork guard: a fork build carries an
+// extra numeric component (X.Y.Z.<fork-rev>) so a plain upstream release must
+// not be installed over it. Ordering is numeric-component-wise.
+func TestShouldRefuseDowngrade(t *testing.T) {
+	cases := []struct {
+		name    string
+		current string
+		latest  string
+		want    bool
+	}{
+		{"fork build newer than its base release", "1.12.1.8", "v1.12.1", true},
+		{"next upstream release is genuinely newer", "1.12.1.8", "v1.12.2", false},
+		{"major bump is newer", "1.12.1.8", "v2.0.0", false},
+		{"exact release match (isUpToDate path)", "1.12.1", "v1.12.1", false},
+		{"fork rev above a later release still refuses", "1.12.1.3", "v1.12.1", true},
+		{"second fork component compares numerically", "1.12.1.10", "v1.12.1.2", true},
+		{"dev build never refuses", "dev", "v1.12.1", false},
+		{"empty current never refuses", "", "v1.12.1", false},
+		{"unparsable current never refuses", "abc", "v1.12.1", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldRefuseDowngrade(tc.current, tc.latest); got != tc.want {
+				t.Errorf("shouldRefuseDowngrade(%q, %q) = %v, want %v", tc.current, tc.latest, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAllowDowngradeEscapeHatch pins the operational override.
+func TestAllowDowngradeEscapeHatch(t *testing.T) {
+	t.Setenv("FREEBUFF_UPDATE_ALLOW_DOWNGRADE", "1")
+	if !allowDowngrade() {
+		t.Error("allowDowngrade() = false with FREEBUFF_UPDATE_ALLOW_DOWNGRADE=1")
+	}
+	t.Setenv("FREEBUFF_UPDATE_ALLOW_DOWNGRADE", "true")
+	if !allowDowngrade() {
+		t.Error("allowDowngrade() = false with FREEBUFF_UPDATE_ALLOW_DOWNGRADE=true")
+	}
+	t.Setenv("FREEBUFF_UPDATE_ALLOW_DOWNGRADE", "")
+	if allowDowngrade() {
+		t.Error("allowDowngrade() = true with the override unset")
+	}
+}
+
+// TestDefaultReleasesRepoStampable pins that the release repo is a package
+// var (ldflags-stampable: -X ...update.defaultReleasesRepo=<slug>), so fork
+// builds track their own releases while the upstream default is unchanged.
+func TestDefaultReleasesRepoStampable(t *testing.T) {
+	if got, want := defaultReleasesURLFor(defaultReleasesRepo),
+		"https://api.github.com/repos/"+defaultReleasesRepo+"/releases/latest"; got != want {
+		t.Errorf("defaultReleasesURLFor(defaultReleasesRepo) = %q, want %q", got, want)
+	}
+	if got := defaultReleasesURLFor("someone/fork"); got != "https://api.github.com/repos/someone/fork/releases/latest" {
+		t.Errorf("defaultReleasesURLFor(someone/fork) = %q", got)
 	}
 }
