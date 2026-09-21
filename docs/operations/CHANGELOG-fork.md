@@ -296,3 +296,19 @@ menerima nama dari variabel `binaryName`; karena arsip rilis fork masih memakai
 `freebuff-proxy`, `-update` dari build `1.14.0.7` tetap menemukan binary (updater
 1.13.0.18 lama yang mencari `freebuff-proxy`). Perbaikan nama menyeluruh akan
 menyusul bila perlu (ganti $bin + binaryName bersamaan).
+
+---
+
+## 2026-09-21 — repo fork di-rename `jhopan/freebucks-proxy`
+
+- Konsisten dengan nama produk baru upstream. URL lama
+  (`github.com/jhopan/freebuff-proxy`) **redirect otomatis** di semua kanal
+  (git remote, REST API, download URL rilis), jadi updater build lama tetap
+  menemukan rilis.
+- `REPO` di `scripts/fork-release.sh` + `.github/workflows/fork-release.yml`
+  diubah ke `jhopan/freebucks-proxy` (commit `a23a9096`).
+- Rilis `v1.14.0.10` dibangun Actions dari repo BARU (6 aset) dan
+  di-deploy VPS via `-update` lewat redirect; setelah itu updater
+  (build .10, stamp repo baru) bilang `Already up to date!`.
+- Remote lokal: `origin = https://github.com/jhopan/freebucks-proxy.git`.
+- Verifikasi Hermes tetap: 32 tool → 200 `HERMES-TOOLS-OK`.
