@@ -151,9 +151,11 @@ var allowed = map[string][]string{
 		"internal/updatecheck",
 		"internal/upstream",
 	},
-	"internal/cli/port":    {},
-	"internal/cli/setup":   {},
-	"internal/cli/update":  {},
+	"internal/cli/port":  {},
+	"internal/cli/setup": {},
+	"internal/cli/update": { // fork: -update refuses downgrades via updatecheck
+		"internal/updatecheck",
+	},
 	"internal/cli/service": {},
 	"internal/cli/doctor": { // -doctor diagnostics
 		"internal/config",

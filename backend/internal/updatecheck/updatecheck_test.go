@@ -71,7 +71,7 @@ func TestLatestFetchesAndCaches(t *testing.T) {
 	// need a transport-level redirect hook: wrap the client so the request
 	// goes to the test server instead.
 	tr := &rewriteTransport{target: srv.URL}
-	c := New(DefaultRepo, &http.Client{Transport: tr, Timeout: fetchTimeout})
+	c := New(DefaultRepo(), &http.Client{Transport: tr, Timeout: fetchTimeout})
 
 	latest, err := c.Latest(context.Background())
 	if err != nil {
@@ -99,7 +99,7 @@ func TestLatestFetchFailureReturnsprev(t *testing.T) {
 	}))
 	defer srv.Close()
 	tr := &rewriteTransport{target: srv.URL}
-	c := New(DefaultRepo, &http.Client{Transport: tr, Timeout: fetchTimeout})
+	c := New(DefaultRepo(), &http.Client{Transport: tr, Timeout: fetchTimeout})
 
 	if latest, err := c.Latest(context.Background()); latest != "" || err == nil {
 		t.Fatalf("Latest = %q, %v; want empty + error on first failure", latest, err)
@@ -120,7 +120,7 @@ func TestLatestFirstFetchFailureBacksOffForTTL(t *testing.T) {
 	}))
 	defer srv.Close()
 	tr := &rewriteTransport{target: srv.URL}
-	c := New(DefaultRepo, &http.Client{Transport: tr, Timeout: fetchTimeout})
+	c := New(DefaultRepo(), &http.Client{Transport: tr, Timeout: fetchTimeout})
 
 	if latest, err := c.Latest(context.Background()); latest != "" || err == nil {
 		t.Fatalf("first Latest = %q, %v; want empty + error", latest, err)
@@ -165,7 +165,7 @@ func TestLatestLogsDecision(t *testing.T) {
 	defer srv.Close()
 
 	var sink bytes.Buffer
-	c := New(DefaultRepo, &http.Client{Transport: &rewriteTransport{target: srv.URL}, Timeout: fetchTimeout})
+	c := New(DefaultRepo(), &http.Client{Transport: &rewriteTransport{target: srv.URL}, Timeout: fetchTimeout})
 	c.SetLogger(slog.New(slog.NewTextHandler(&sink, &slog.HandlerOptions{Level: slog.LevelDebug})))
 
 	// First lookup fetches → decision=fetched with ms.
@@ -193,7 +193,7 @@ func TestLatestLogsDecision(t *testing.T) {
 	}))
 	defer srvFail.Close()
 	var sinkFail bytes.Buffer
-	c2 := New(DefaultRepo, &http.Client{Transport: &rewriteTransport{target: srvFail.URL}, Timeout: fetchTimeout})
+	c2 := New(DefaultRepo(), &http.Client{Transport: &rewriteTransport{target: srvFail.URL}, Timeout: fetchTimeout})
 	c2.SetLogger(slog.New(slog.NewTextHandler(&sinkFail, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	if _, err := c2.Latest(context.Background()); err == nil {
 		t.Fatal("Latest against a 500 source succeeded, want error")

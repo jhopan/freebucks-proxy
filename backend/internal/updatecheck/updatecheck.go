@@ -21,8 +21,15 @@ import (
 	"time"
 )
 
-// DefaultRepo is the upstream repo whose releases the indicator checks.
-const DefaultRepo = "trefeon/freebucks-proxy"
+// defaultRepo is the repo whose releases the indicator checks. A var (not
+// const) so a fork build can stamp its OWN release channel at build time:
+// -X freebucks-proxy/backend/internal/updatecheck.defaultRepo=<owner>/<repo>
+// (the -X linker flag only injects vars). Default stays upstream; callers
+// that need the (possibly stamped) value read DefaultRepo().
+var defaultRepo = "trefeon/freebucks-proxy"
+
+// DefaultRepo reports the (possibly stamped) repo for update checks.
+func DefaultRepo() string { return defaultRepo }
 
 // CacheTTL is how long a fetched latest-release tag is reused (issue #50:
 // "cached 6h").

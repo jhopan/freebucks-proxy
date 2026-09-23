@@ -452,7 +452,7 @@ func Serve(configPath string, verbose bool, version string) int {
 	serverOpts = append(serverOpts, server.WithHistory(histStore))
 	// Issue #50b: release update indicator — the dashboard badge compares
 	// the running version against the latest GitHub release (6h cache).
-	serverOpts = append(serverOpts, server.WithVersion(version, updatecheck.New(updatecheck.DefaultRepo, nil)))
+	serverOpts = append(serverOpts, server.WithVersion(version, updatecheck.New(updatecheck.DefaultRepo(), nil)))
 
 	srv := server.New(&cfg, p, reg, logger, logringHandler, configPath, serverOpts...)
 	// Session locality: install the resolver on the pooled clients and wire

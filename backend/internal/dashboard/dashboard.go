@@ -97,8 +97,12 @@ func New(cfg func() *config.Config, p *pool.Pool, reg *registry.Registry, logger
 	return d
 }
 
-// releaseURL is where the update badge points (the releases page).
-const releaseURL = "https://github.com/trefeon/freebucks-proxy/releases"
+// releaseURLFor builds the releases page URL for a repo. The badge and the
+// APIVersion payload follow the STAMPED update repo (var defaultRepo in
+// internal/updatecheck) so a fork links to its own channel.
+func releaseURLFor(repo string) string {
+	return "https://github.com/" + repo + "/releases"
+}
 
 // pickDefaultModel selects the catalog fallback (the mimo row) when present, or the first available model.
 func pickDefaultModel(models []string) string {
@@ -145,7 +149,7 @@ func (d *Dashboard) APIVersion(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	resp := VersionResponse{
 		CurrentVersion: d.version,
-		UpdateURL:      releaseURL,
+		UpdateURL:      releaseURLFor(updatecheck.DefaultRepo()),
 	}
 	if d.version != "" && d.updates != nil && r.Context() != nil {
 		if r.URL != nil && r.URL.Query().Get("force") == "true" {

@@ -272,6 +272,17 @@ type RestartResponse struct {
 	OK      bool   `json:"ok"`
 }
 
+// UpdateResponse is the POST /admin/update answer.
+// Status: "updated" (binary swapped, restart pending), "up_to_date", or
+// "refused_downgrade". The dashboard treats "updated" as the trigger for the
+// existing restart action.
+type UpdateResponse struct {
+	Message string `json:"message"`
+	OK      bool   `json:"ok"`
+	Status  string `json:"status"`
+	Output  string `json:"output,omitempty"`
+}
+
 // DiagResponse is the POST /admin/diag answer.
 type DiagResponse struct {
 	Checks []DiagCheck `json:"checks"`
