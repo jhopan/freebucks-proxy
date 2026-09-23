@@ -40,9 +40,9 @@ type adminHandlers struct {
 
 	adminAuth   *adminAuth
 	adminSaveMu sync.Mutex
-	// updateMu serializes POST /admin/update with itself; updateStateMu guards
-	// the in-flight flag used by updateTry/updateDone.
-	updateMu      sync.Mutex
+	// updateStateMu guards the in-flight updateRunning flag: POST
+	// /admin/update takes the slot with updateTry (non-blocking 409 when
+	// busy) and releases it with updateDone when the updater pass returns.
 	updateStateMu sync.Mutex
 	updateRunning bool
 	loginMu       sync.Mutex
