@@ -350,3 +350,35 @@ menyusul bila perlu (ganti $bin + binaryName bersamaan).
 - Pitfall versi: tag `v1.14.0.11/.12` GAGAL version-check karena
   `fork-version.sh` menghitung commit sejak tag upstream — tag HARUS
   `v$(sh scripts/fork-version.sh)` persis pada commit HEAD saat push.
+
+---
+
+## 2026-09-24 — port ke upstream v1.18.9 (`v1.18.9.6`)
+
+### Port (reset ke sejarah upstream + re-apply aset fork)
+
+- Upstream maju 47 commit (`v1.14.x` → `v1.18.9`): tool-mapping hardening
+  (#686/#687/#689 + corpus 789 kasus), wire-grammar legalisasi, vendor
+  0.0.188 (complete_compaction), egress region (#711), streak bonus worker
+  (#708/#717–#720), `SLOTS_PER_ACCOUNT=3` default (#695), dashboard redesign
+  (#703–#707), session re-admit seat-gated (#690), run-resume race fix (#680).
+- Aset fork re-apply: test pin Hermes (2 file), kanal rilis sendiri
+  (`defaultReleasesRepo` + `updatecheck.defaultRepo` stamp), guard
+  anti-downgrade, `POST /admin/update` + tombol frontend, docs, Taskfile
+  `build:fork`.
+- Merge per file: `cli_serve.go`/`archtest`/`server_routes.go` diambil
+  utuh dari upstream (egress tracker hidup lagi), lalu edge fork
+  re-added (`internal/cli/update → internal/updatecheck`, route
+  `POST /admin/update`, call `DefaultRepo()`). `dashboard_pages_test.go`
+  ikut dipanggil `DefaultRepo()`.
+
+### Verifikasi
+
+- `go test ./backend/...` 35+ paket hijau; vet/gofmt bersih.
+- Hermes pin: `TestHermesFullToolsetWireClean` + `TestAgentLoopContinuationTurn`
+  PASS di atas mapper v1.18.9; corpus sweep upstream juga hijau.
+- CI 96685c73: test/golangci/analyze/frontend success.
+- Rilis `v1.18.9.6` via Actions: 6 aset `freebucks-proxy_*` + checksums.
+  (v1.18.9.5 dibangun sebelum fix lint — tanda `latest` pindah ke .6.)
+- Pitfall lint: sisa field `updateMu` unused → hapus; pelajaran sama:
+  setelah refactor non-blocking busy, tidak boleh ada sisa serialize lama.
