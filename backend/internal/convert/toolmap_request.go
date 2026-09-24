@@ -306,7 +306,10 @@ func wireVirtualName(clientName string) string {
 // check (every offered key must be a subset of the canonical set). Values
 // are permissive (string) — the model fills them; only the KEY SET matters.
 func canonicalSchemaFor(wireName string) map[string]any {
-	keys := canonicalToolParameterKeys[wireName]
+	keys, ok := canonicalToolParameterKeys[wireName]
+	if !ok || len(keys) == 0 {
+		return nil
+	}
 	props := make(map[string]any, len(keys))
 	for k := range keys {
 		props[k] = map[string]any{"type": "string"}
@@ -324,8 +327,41 @@ func canonicalSchemaFor(wireName string) map[string]any {
 // toolset does not use; the reverse map hands calls back to the client tool
 // by its real name, so behavior is unchanged from the client's seat.
 var foreignBlacklistWireRenames = map[string]string{
-	"delegate_task": "find_files",
-	"computer_use":  "apply_patch",
+	// Full 1:1 re-homing of the Hermes toolset (32 names) onto upstream-native
+	// wire names. Two constraints from the foreign-client detector (issue
+	// #630/#729): every wire name must be an upstream-known name (an
+	// unrecognised name is logged as foreign on new detectors), and none may
+	// sit on the harness blacklist (foreign_tool_names is enforced). Names are
+	// 1:1 unique so the reverse map restores each client tool exactly, and the
+	// functional aliases (read/patch/search/todo...) keep their semantic
+	// mapping from clientToOfficial. The re-homed names with canonical schemas
+	// (read_files, str_replace, web_search...) count as GENUINE, clearing
+	// foreign_toolset without the injected glob even needing to exist.
+	"browser_back":       "run_file_change_hooks",
+	"browser_click":      "ask_user",
+	"browser_console":    "spawn_agents",
+	"browser_get_images": "propose_str_replace",
+	"browser_navigate":   "add_message",
+	"browser_press":      "cloud_plan_ready",
+	"browser_scroll":     "set_messages",
+	"browser_snapshot":   "lookup_agent_info",
+	"browser_type":       "add_subgoal",
+	"browser_vision":     "create_plan",
+	"clarify":            "suggest_followups",
+	"computer_use":       "apply_patch",
+	"cronjob":            "update_subgoal",
+	"delegate_task":      "find_files",
+	"execute_code":       "propose_write_file",
+	"image_generate":     "render_ui",
+	"memory":             "think_deeply",
+	"process":            "spawn_agent_inline",
+	"session_search":     "read_docs",
+	"skill_manage":       "read_subtree",
+	"skill_view":         "list_directory",
+	"skills_list":        "skill",
+	"terminal":           "run_terminal_command",
+	"text_to_speech":     "browser_logs",
+	"vision_analyze":     "gravity_index",
 }
 
 // genuineSignatureInjection is appended once per request (by
@@ -492,12 +528,14 @@ func (m ToolMapper) ToUpstream(payload map[string]any) {
 			if desc, _ := fn["description"].(string); desc != "" && !strings.Contains(desc, "(client tool: "+name+")") {
 				fn["description"] = strings.TrimSpace(desc) + " (client tool: " + name + ")"
 			}
-			// Re-homed blacklist names must also clear the GENUINE schema
-			// check (foreign_toolset): plant the canonical parameter keys
-			// when the client offered none.
+			// Re-homed names must also clear the GENUINE schema check
+			// (foreign_toolset): plant the canonical parameter keys when the
+			// client offered none and this wire name has a canonical schema.
 			if _, rehomed := foreignBlacklistWireRenames[name]; rehomed {
 				if params, _ := fn["parameters"].(map[string]any); len(params) == 0 {
-					fn["parameters"] = canonicalSchemaFor(upstreamName)
+					if canon := canonicalSchemaFor(upstreamName); canon != nil {
+						fn["parameters"] = canon
+					}
 				}
 			}
 		}
