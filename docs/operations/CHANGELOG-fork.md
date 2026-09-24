@@ -382,3 +382,38 @@ menyusul bila perlu (ganti $bin + binaryName bersamaan).
   (v1.18.9.5 dibangun sebelum fix lint — tanda `latest` pindah ke .6.)
 - Pitfall lint: sisa field `updateMu` unused → hapus; pelajaran sama:
   setelah refactor non-blocking busy, tidak boleh ada sisa serialize lama.
+
+---
+
+## 2026-09-24 — genuine-signature injection (issue #630/#729) `v1.18.9.8`
+
+### Akar masalah 502 `No endpoints found for <model>`
+
+Freebuff menambah deteksi foreign-client (vendor 17–18 Sep,
+`foreign-client-signals.ts`): request dengan `tools[]` yang
+- TIDAK membawa satu pun "genuine signature tool" (nama resmi + non-empty
+  subset dari canonical parameter keys) → `foreign_toolset`, atau
+- membawa NAMA harness dari blacklist (`delegate_task`, `computer_use`, …)
+  → `foreign_tool_names`
+di-**downgrade** ke model downgrade dan muncul sebagai 404 "No endpoints
+found for <model asal>". `mcp__` virtualization tidak lagi menolong —
+detector mem-pins definisi hollow proxy publik secara byte-for-byte
+(issue #630, komentar kaivanriz).
+
+### Fix (fork)
+
+- Inject satu tool GENUINE per request: `glob` (nama canonical yang tidak
+  dipakai Hermes) dengan schema `{"pattern": string}` (subset canonical keys)
+  + description "Do not call." → `foreign_toolset` clear.
+- Re-home 2 nama Hermes yang ada di blacklist:
+  `delegate_task → find_files`, `computer_use → apply_patch`
+  dengan canonical schema (`prompt` / `operation`) → `foreign_tool_names`
+  clear; reverse map mengembalikan nama klien.
+- Test pin Hermes + corpus + 630 tests diupdate (glob masuk wire).
+- `go test ./backend/...` hijau; CI/lint/codeql hijau di `f0d34297`.
+
+### Batasan
+
+- Fix ini menyelesaikan ENFORCEMENT tool-leg. Suspensi akun oleh freebuff
+  (third-party client) adalah enforcement terpisah — akun yang sudah
+  suspended tetap 403 meski request bersih.
