@@ -417,3 +417,37 @@ detector mem-pins definisi hollow proxy publik secara byte-for-byte
 - Fix ini menyelesaikan ENFORCEMENT tool-leg. Suspensi akun oleh freebuff
   (third-party client) adalah enforcement terpisah — akun yang sudah
   suspended tetap 403 meski request bersih.
+
+---
+
+## 2026-09-24 — parity audit vs CodebuffAI/freebuff (opsi B)
+
+### Sumber: repo publik CodebuffAI/freebuff (snapshot a3876d2)
+
+Detektor foreign-client tidak ada di repo publik (server-side), tapi semua
+interface-nya bisa diaudit:
+
+### Hasil audit parity (proxy vs CLI resmi)
+
+| Layer | CLI resmi | Proxy | Status |
+|---|---|---|---|
+| TLS | Bun 1.3.14 (BoringSSL, Chrome-class) | utls `TLS_FINGERPRINT=auto` (Chrome-class) | ✅ sama class |
+| UA chat | `ai-sdk/openai-compatible/1.0.0/codebuff` | sama | ✅ |
+| UA session/login | `Bun/1.3.14` | sama | ✅ |
+| Chat headers | Bearer-only, TANPA x-freebuff-model/instance | sama (#106) | ✅ |
+| Session headers | x-fb-timezone, x-freebuff-first-tab-discount | sesuai | ✅ |
+| Tools | base2 free toolset + canonical schema | 32 1:1 re-home + canonical schema | ✅ |
+| Acting user | `x-freebuff-acting-user-id` (id sendiri) | ACTING_USER_ID = id akun sendiri | ✅ baru |
+| Fingerprint | machine-derived | isolated per wizard | ✅ |
+
+### Yang tidak bisa ditiru dari source publik
+
+- ad-render acknowledgement (opsional di wire — "a binary that predates these
+  fields must keep acking", tidak diwajibkan)
+- HTTP/2 frame timing/SETTINGS persis Bun (utls meniru Chrome-class, close enough)
+
+### Konfigurasi aktual
+
+- Lokal: `TLS_FINGERPRINT=auto` + `ACTING_USER_ID=<id sendiri>` (118354d8)
+- VPS: `TLS_FINGERPRINT=auto`; fix baris `.env` rusak (`MODEL_LOCKS` nyambung
+  TLS_FINGERPRINT — dihapus, akun suspended diparkir)
