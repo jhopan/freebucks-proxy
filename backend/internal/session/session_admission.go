@@ -410,6 +410,7 @@ func (m *Manager) releaseHeldSlotForTarget(ctx context.Context, targetModel stri
 // (the caller is riding it) — return instead of committing nil and looping.
 func (m *Manager) refresh(ctx context.Context, requestedModel string, preemptive bool) error {
 	admitStart := time.Now()
+	prevAdmitted := false
 	targetModel := requestedModel
 	// Issue #158: a model cached unavailable skips the 409 admission
 	// roundtrip entirely (see modelUnavailableShortCircuit).
@@ -420,6 +421,21 @@ func (m *Manager) refresh(ctx context.Context, requestedModel string, preemptive
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+
+		// Fork 2026-09-25: pace consecutive ADMISSIONS inside this loop.
+		// Four creates within ~600ms (the observed 16:39 re-admit storm) is
+		// a machine-shaped burst upstream can flag; the CLI spreads its
+		// re-admits over seconds. Back off before the 2nd+ create that
+		// this loop performs (i>0 and the previous iteration ended in an
+		// admission — tracked by prevAdmitted).
+		if i > 0 && prevAdmitted {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(ReAdmitPacingDelay):
+			}
+		}
+		prevAdmitted = false
 
 		m.mu.Lock()
 		cached := m.state
@@ -439,6 +455,7 @@ func (m *Manager) refresh(ctx context.Context, requestedModel string, preemptive
 			st, err = m.pollPersisted(ctx, targetModel)
 			if st == nil && err == nil {
 				st, err = m.adoptOrCreate(ctx, targetModel)
+				prevAdmitted = true // this iteration performed an upstream admission
 			}
 		} else {
 			// Live refresh (expired cache or model mismatch): never consult
@@ -453,6 +470,7 @@ func (m *Manager) refresh(ctx context.Context, requestedModel string, preemptive
 			// lands on the held model does not churn a release+recreate.
 			m.releaseHeldSlotForTarget(ctx, targetModel)
 			st, err = m.adoptOrCreate(ctx, targetModel)
+			prevAdmitted = true // this iteration performed an upstream admission
 		}
 		if err != nil {
 			// #140: a 428 waiting_room_required on the queued row's
@@ -649,10 +667,37 @@ func (m *Manager) refresh(ctx context.Context, requestedModel string, preemptive
 			if releaseID == "" {
 				releaseID = heldID
 			}
+			// Fork 2026-09-25: the model-lock refusal body carries no
+			// instanceId when this manager has never seen the live session
+			// (fresh manager after a restart, or the slot admitted out of
+			// band). A bare DELETE then fails 400 instance_required and the
+			// refresh loop burns its budget re-admitting into the same 409 —
+			// four admissions inside a second is exactly the machine-shaped
+			// burst that gets accounts flagged. Resolve the live instance id
+			// with ONE instance-free GET (a poll, not an admission: zero
+			// session churn) before releasing; if even that yields nothing,
+			// back off instead of hammering.
+			if releaseID == "" {
+				if live, err := m.client.GetSession(ctx, ""); err == nil && live != nil && live.InstanceID != "" {
+					releaseID = live.InstanceID
+					slog.Debug("model-lock release id resolved via instance-free poll", "instance_id", releaseID, "current", live.CurrentModel)
+				}
+			}
 			// Best-effort like before; a receipt still feeds the refund
 			// tracking so a pending settlement stays replayable.
 			if rcpt, _ := m.client.EndSession(ctx, releaseID); rcpt != nil {
 				m.recordReleaseReceipt(releaseID, rcpt)
+			}
+			prevAdmitted = true // a release+retry performs another admission next iteration
+			if releaseID == "" {
+				// Still nothing to release — do NOT loop admissions into the
+				// same 409 at machine speed. Back off hard: park this refresh
+				// long enough for the upstream lock window (60s session slot)
+				// to matter, mirroring the CLI's own slower cadence.
+				select {
+				case <-ctx.Done():
+				case <-time.After(modelLockUnresolvedBackoff):
+				}
 			}
 			slog.Debug("session released on model lock, retrying", "instance_id", releaseID, "reason", reasonModelLock, "current", st.CurrentModel, "target", targetModel)
 		case "model_unavailable":

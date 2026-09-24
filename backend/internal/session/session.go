@@ -29,10 +29,22 @@ const (
 	graceWindow = 30 * time.Minute
 	// maxRefreshIterations bounds the create/poll status loop.
 	maxRefreshIterations = 5
+
 	// maxOuterIterations bounds EnsureSession's refresh attempts per call so
 	// a pathological upstream (always-expired or never-advancing queue)
 	// cannot spin forever.
 	maxOuterIterations = 10
+)
+
+// Fork 2026-09-25 pacing knobs (machine-burst mitigation):
+// ReAdmitPacingDelay spreads consecutive admissions inside one refresh loop;
+// modelLockUnresolvedBackoff parks the refresh when a model-locked session
+// cannot be released (no instance id from refusal, cache, or poll) — the
+// admission+DELETE burst at machine speed is the shape that got a full-tier
+// account flagged on 2026-09-24. Tests override both via setPacingForTest.
+var (
+	ReAdmitPacingDelay         = 3 * time.Second
+	modelLockUnresolvedBackoff = 15 * time.Second
 )
 
 // DefaultFallbackModelFor resolves the guaranteed-available fallback
