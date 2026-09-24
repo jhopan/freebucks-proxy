@@ -125,7 +125,7 @@ func (c *Client) TokenKey() string {
 // empirically + snapshot-verified, the real CLI emits this UA on chat only;
 // every other upstream call goes through plain Bun fetch (#108/#109
 // rationale superseded by newest-source evidence).
-const cliUserAgent = "ai-sdk/openai-compatible/1.0.0/codebuff"
+const cliUserAgent = "ai-sdk/openai-compatible/1.0.0/codebuff ai-sdk/provider-utils/3.0.39 runtime/bun/1.3.14"
 
 // bunUserAgent is the default Bun fetch User-Agent the real CLI's non-chat
 // calls carry: session POST/GET/probe/DELETE, agent-runs START/FINISH,

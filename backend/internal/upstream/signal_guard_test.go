@@ -368,8 +368,11 @@ func TestAgentRunsDualAuthScrubsRelayedKey(t *testing.T) {
 }
 
 // TestSignalGuardChatUserAgent pins the chat POST User-Agent to the exact
-// ai-sdk/openai-compatible/1.0.0/codebuff string the official CLI pins on
-// model calls (chat is the ONLY path carrying it).
+// ai-sdk/openai-compatible/1.0.0/codebuff ai-sdk/provider-utils/3.0.39
+// runtime/bun/1.3.14 string the official CLI pins on model calls (chat is
+// the ONLY path carrying it). Captured 2026-09-24 from the live CLI 0.0.193
+// via fetch instrumentation: llm-providers VERSION 1.0.0 +
+// provider-utils 3.0.39 (bun.lock root) + Bun navigator.userAgent.
 func TestSignalGuardChatUserAgent(t *testing.T) {
 	srv := newRecordingUpstream()
 	defer srv.Close()
