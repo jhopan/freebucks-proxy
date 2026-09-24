@@ -1347,9 +1347,9 @@ func TestNormalizeRequestDeepSeekInjectionAfterStrip(t *testing.T) {
 		}
 	}
 	tools, ok := got["tools"].([]any)
-	// normalizeToolSchemas injects end_turn + decide signature tools, so the wire
-	// carries the client tool plus injected tools.
-	if !ok || len(tools) != 3 {
+	// normalizeToolSchemas injects glob + end_turn + decide signature tools, so
+	// the wire carries the client tool plus injected tools.
+	if !ok || len(tools) != 4 {
 		t.Fatalf("tools = %v, want client tool + injected signature tools", got["tools"])
 	}
 	tool := tools[0].(map[string]any)

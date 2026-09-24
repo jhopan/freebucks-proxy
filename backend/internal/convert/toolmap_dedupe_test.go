@@ -57,7 +57,7 @@ func TestToolMapperDedupeDuplicateWireNames(t *testing.T) {
 			continue
 		}
 		name, _ := fn["name"].(string)
-		if name == "end_turn" || name == "decide" {
+		if name == "end_turn" || name == "decide" || name == "glob" {
 			continue
 		}
 		if seen[name] {
@@ -130,7 +130,7 @@ func TestToolMapperWireNameOwnerRoundTrips(t *testing.T) {
 			for _, item := range wireTools {
 				fn, _ := item.(map[string]any)["function"].(map[string]any)
 				name, _ := fn["name"].(string)
-				if name == "" || name == "end_turn" || name == "decide" {
+				if name == "" || name == "end_turn" || name == "decide" || name == "glob" {
 					continue
 				}
 				got[name] = mapper.RestoreName(name)
@@ -170,7 +170,7 @@ func TestToolMapperLegacyFunctionsOwnership(t *testing.T) {
 	for _, item := range wireTools {
 		fn, _ := item.(map[string]any)["function"].(map[string]any)
 		name, _ := fn["name"].(string)
-		if name == "" || name == "end_turn" || name == "decide" {
+		if name == "" || name == "end_turn" || name == "decide" || name == "glob" {
 			continue
 		}
 		got[name] = mapper.RestoreName(name)

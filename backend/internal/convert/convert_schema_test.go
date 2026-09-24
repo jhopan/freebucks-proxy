@@ -388,11 +388,11 @@ func TestNormalizeRequestInjectsEndTurnTool(t *testing.T) {
 	}
 	got := decode(t, out)
 	tools, ok := got["tools"].([]any)
-	if !ok || len(tools) != 3 {
-		t.Fatalf("want 3 tools (custom_tool + end_turn + decide), got %v", tools)
+	if !ok || len(tools) != 4 {
+		t.Fatalf("want 4 tools (custom_tool + glob + end_turn + decide), got %v", tools)
 	}
 
-	hasCustom, hasEndTurn, hasDecide := false, false, false
+	hasCustom, hasEndTurn, hasDecide, hasGlob := false, false, false, false
 	for _, tVal := range tools {
 		if tm, ok := tVal.(map[string]any); ok {
 			if fn, ok := tm["function"].(map[string]any); ok {
@@ -405,11 +405,14 @@ func TestNormalizeRequestInjectsEndTurnTool(t *testing.T) {
 				if fn["name"] == "decide" {
 					hasDecide = true
 				}
+				if fn["name"] == "glob" {
+					hasGlob = true
+				}
 			}
 		}
 	}
-	if !hasCustom || !hasEndTurn || !hasDecide {
-		t.Errorf("hasCustom = %v, hasEndTurn = %v, hasDecide = %v", hasCustom, hasEndTurn, hasDecide)
+	if !hasCustom || !hasEndTurn || !hasDecide || !hasGlob {
+		t.Errorf("hasCustom = %v, hasEndTurn = %v, hasDecide = %v, hasGlob = %v", hasCustom, hasEndTurn, hasDecide, hasGlob)
 	}
 }
 
@@ -456,19 +459,23 @@ func TestNormalizeRequestNonMapToolsEndTurn(t *testing.T) {
 		if !ok {
 			t.Fatal("tools missing")
 		}
-		if len(tools) != 4 {
-			t.Fatalf("tools = %v, want [not-a-map, 42, end_turn, decide]", tools)
+		if len(tools) != 5 {
+			t.Fatalf("tools = %v, want [not-a-map, 42, glob, end_turn, decide]", tools)
 		}
 		if tools[0] != "not-a-map" || tools[1] != float64(42) {
 			t.Errorf("non-map entries were modified: %v", tools[:2])
 		}
-		endTurn, ok := tools[2].(map[string]any)
-		if !ok || endTurn["function"].(map[string]any)["name"] != "end_turn" {
-			t.Errorf("tools[2] = %v, want the end_turn tool", tools[2])
+		globTool, ok := tools[2].(map[string]any)
+		if !ok || globTool["function"].(map[string]any)["name"] != "glob" {
+			t.Errorf("tools[2] = %v, want the injected glob tool", tools[2])
 		}
-		decideTool, ok := tools[3].(map[string]any)
+		endTurn, ok := tools[3].(map[string]any)
+		if !ok || endTurn["function"].(map[string]any)["name"] != "end_turn" {
+			t.Errorf("tools[3] = %v, want the end_turn tool", tools[3])
+		}
+		decideTool, ok := tools[4].(map[string]any)
 		if !ok || decideTool["function"].(map[string]any)["name"] != "decide" {
-			t.Errorf("tools[3] = %v, want the decide tool", tools[3])
+			t.Errorf("tools[4] = %v, want the decide tool", tools[4])
 		}
 	})
 
