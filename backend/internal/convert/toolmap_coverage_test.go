@@ -150,7 +150,7 @@ func TestComprehensiveToolClassification(t *testing.T) {
 		{"OpenHands", "invoke_skill", classMapped, "skill"},
 		{"OpenHands", "file_editor", classPassthru, ""},
 		{"OpenHands", "task_tracker", classPassthru, ""},
-		{"OpenHands", "browser_navigate", classPassthru, ""},
+		{"OpenHands", "browser_navigate", classMapped, "add_message"},
 		{"OpenHands", "canvas_ui", classPassthru, ""},
 		{"OpenHands", "finish", classPassthru, ""},
 
@@ -209,11 +209,11 @@ func TestComprehensiveToolClassification(t *testing.T) {
 		{"Jcode", "todoread", classMapped, "write_todos"},
 		{"Jcode", "skill_manage", classMapped, "skill"},
 		{"Jcode", "browser", classPassthru, ""},
-		{"Jcode", "memory", classPassthru, ""},
+		{"Jcode", "memory", classMapped, "think_deeply"},
 		{"Jcode", "initiative", classPassthru, ""},
 		{"Jcode", "swarm", classPassthru, ""},
 		{"Jcode", "todo_read", classMapped, "write_todos"},
-		{"Jcode", "session_search", classPassthru, ""},
+		{"Jcode", "session_search", classMapped, "read_docs"},
 
 		// ── Codewhale (reference/agents/Codewhale crates/tui/src/tools) ──
 		{"Codewhale", "read", classMapped, "read_files"},
@@ -237,8 +237,9 @@ func TestComprehensiveToolClassification(t *testing.T) {
 		{"Hermes", "skills_list", classMapped, "skill"},
 		{"Hermes", "skill_view", classMapped, "skill"},
 		{"Hermes", "skill_manage", classMapped, "skill"},
-		// clarify stays unmapped: no official ask_user target exists.
-		{"Hermes", "clarify", classPassthru, ""},
+		// clarify now re-homes to suggest_followups (foreign-toolset clearance,
+		// 32-name 1:1 re-homing).
+		{"Hermes", "clarify", classMapped, "suggest_followups"},
 
 		// ── Universal harness entries (design §5 genuinely-matching only;
 		//    virtualize/passthrough owns Agent/swarm/selfdev/process_manage/download) ──

@@ -82,8 +82,8 @@ func TestIssue729LiveGateClear(t *testing.T) {
 		}},
 	})
 	names := toolNamesOf(tools)
-	if len(names) != 3 || names[0] != "test_tool" || names[1] != "end_turn" || names[2] != "decide" {
-		t.Fatalf("wire tools = %v, want [test_tool end_turn decide]", names)
+	if len(names) != 4 || names[0] != "test_tool" || names[1] != "glob" || names[2] != "end_turn" || names[3] != "decide" {
+		t.Fatalf("wire tools = %v, want [test_tool glob end_turn decide]", names)
 	}
 	// Proxy egress carries neither header on any path (pinned by
 	// TestSignalGuardNoProxySignalHeaders): no_header, not detected.
@@ -132,8 +132,8 @@ func TestIssue630MatrixLiveGateClear(t *testing.T) {
 	for name, body := range shapes {
 		t.Run(name, func(t *testing.T) {
 			tools := wireToolsOf(t, body)
-			if name == "tools" && len(tools) != 3 {
-				t.Fatalf("tools shape emitted %d wire tools, want 3", len(tools))
+			if name == "tools" && len(tools) != 4 { // fork: + genuine glob signature tool
+				t.Fatalf("tools shape emitted %d wire tools, want 4 (incl. genuine glob)", len(tools))
 			}
 			if name != "tools" && len(tools) != 0 {
 				t.Fatalf("%s emitted %d wire tools, want bare", name, len(tools))

@@ -27,6 +27,11 @@ tasks:
     cmds:
       - npm --prefix frontend run test:e2e
 
+  build:fork:
+    desc: Build a versioned fork binary (own release channel + update-badge repo stamp)
+    cmds:
+      - go build -o bin/freebucks-proxy{{exeExt}} -tags dashboard -trimpath -ldflags "-s -w -X main.version=$(sh scripts/fork-version.sh) -X freebucks-proxy/backend/internal/cli/update.defaultReleasesRepo=jhopan/freebucks-proxy -X freebucks-proxy/backend/internal/updatecheck.defaultRepo=jhopan/freebucks-proxy" ./backend/cmd/freebucks-proxy
+
   build:proxy:
     desc: Compile the Go proxy binary
     cmds:

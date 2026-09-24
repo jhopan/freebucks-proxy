@@ -94,12 +94,12 @@ func TestIssue630TestToolWireVerdict(t *testing.T) {
 		}},
 	})
 	names := toolNamesOf(tools)
-	if len(names) != 3 || names[0] != "test_tool" || names[1] != "end_turn" || names[2] != "decide" {
-		t.Fatalf("wire tools = %v, want [test_tool end_turn decide]", names)
+	if len(names) != 4 || names[0] != "test_tool" || names[1] != "glob" || names[2] != "end_turn" || names[3] != "decide" {
+		t.Fatalf("wire tools = %v, want [test_tool glob end_turn decide]", names)
 	}
 	v := ClassifyWireTools(tools)
-	if len(v.Genuine) != 1 || v.Genuine[0] != "decide" {
-		t.Errorf("genuine = %v, want [decide]", v.Genuine)
+	if len(v.Genuine) != 2 || v.Genuine[0] != "glob" || v.Genuine[1] != "decide" {
+		t.Errorf("genuine = %v, want [glob decide]", v.Genuine)
 	}
 	if len(v.Hollow) != 0 {
 		t.Errorf("hollow = %v, want empty", v.Hollow)
@@ -152,7 +152,7 @@ func TestIssue630MappedSubsetClearsToolLeg(t *testing.T) {
 	}
 	tools, _ := decode(t, out)["tools"].([]any)
 	v := ClassifyWireTools(tools)
-	if len(v.Genuine) != 2 || v.Genuine[0] != "run_terminal_command" || v.Genuine[1] != "decide" {
+	if len(v.Genuine) != 3 || v.Genuine[0] != "run_terminal_command" || v.Genuine[1] != "glob" || v.Genuine[2] != "decide" {
 		t.Errorf("genuine = %v, want [run_terminal_command decide]", v.Genuine)
 	}
 	if s := WireForeignSignal(v); s != "" {

@@ -49,6 +49,7 @@ func normalizeToolSchemas(payload map[string]any, opts Options) {
 	budget := opts.MaxSchemaNodes
 	hasEndTurn := false
 	hasDecide := false
+	hasGenuine := false
 	for _, t := range tools {
 		tool, ok := t.(map[string]any)
 		if !ok {
@@ -58,22 +59,24 @@ func normalizeToolSchemas(payload map[string]any, opts Options) {
 		if !ok {
 			continue
 		}
-		if name, ok := fn["name"].(string); ok {
-			if name == "end_turn" {
-				hasEndTurn = true
-			}
-			if name == "decide" {
-				hasDecide = true
-			}
+		name, _ := fn["name"].(string)
+		if name == "end_turn" {
+			hasEndTurn = true
+		}
+		if name == "decide" {
+			hasDecide = true
 		}
 		params, ok := fn["parameters"].(map[string]any)
 		if !ok {
 			continue
 		}
+		if IsGenuineSignatureTool(name, params) {
+			hasGenuine = true
+		}
 		fn["parameters"] = normalizeToolSchemaCached(params, &budget)
 	}
 	// End-turn and signature injection lives in schemacache_endturn.go
-	injectEndTurnTool(payload, tools, hasEndTurn, hasDecide)
+	injectEndTurnTool(payload, tools, hasEndTurn, hasDecide, hasGenuine)
 }
 
 // ---------------------------------------------------------------------------
