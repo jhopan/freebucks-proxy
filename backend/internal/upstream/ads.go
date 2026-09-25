@@ -112,9 +112,11 @@ func (c *Client) FireWaitingRoomChain(ctx context.Context) {
 	}
 }
 
-// waitingRoomAdProviders mirrors the reference default
-// (freebuff2api-optimized config.py: ad_providers=("gravity","zeroclick")).
-var waitingRoomAdProviders = []string{"gravity", "zeroclick"}
+// waitingRoomAdProviders mirrors the live CLI ad surfaces
+// (use-gravity-ad.ts AdProvider: gravity | carbon | imprezia — the
+// freebuff2api "zeroclick" reference provider is rejected upstream with
+// "Invalid option" and was retired from the wire).
+var waitingRoomAdProviders = []string{"gravity", "carbon"}
 
 // requestAds POSTs one /api/v1/ads payload (reference cli/src/hooks/
 // use-gravity-ad.ts fetchAd + common/src/util/ad-user-agent.ts: provider +
