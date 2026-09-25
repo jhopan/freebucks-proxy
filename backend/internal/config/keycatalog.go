@@ -271,6 +271,11 @@ var keyCatalog = []KeyDef{
 		Description: `Path of the session state file (used when SESSION_PERSIST=true; token-keyed, 0600, raw tokens never written).`,
 	},
 	{
+		Key: "SINGLE_CLIENT_GUARD", Group: GroupPool, Kind: "bool", RestartOnly: true, Hidden: true,
+		Default:     "true",
+		Description: `Refuse to start while a live official CLI (freebuff/codebuff) is detected on this host. The CLI and this gateway are two clients for ONE account — both read the CLI's credentials file and upstream admits one seat per account — so running both supersedes sessions (409) and is the duplicate-client pattern the ban post-mortem flags. ADOPT_CLI_SESSION=true is the supported way to run both. Set false where the process scan is meaningless (CI, restricted containers).`,
+	},
+	{
 		Key: "SLOTS_PER_ACCOUNT", Group: GroupPool, Kind: "int",
 		Default:     "3",
 		Description: `Cap on concurrent live turns per account-model lane (default 3; 2 is the conservative posture and 1 the strictest — fully sequential turns per lane, zero parallel fingerprint; 0 = unlimited, no slot gating at all). A lease is granted only while the account holds fewer live turns for that model; excess waiters park FIFO until QUEUE_WAIT elapses. Applies live on reload.`,

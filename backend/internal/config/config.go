@@ -160,6 +160,17 @@ type Config struct {
 	// refresh); while the CLI process is alive a competing session is
 	// never created (issue #97).
 	AdoptCLISession bool
+	// SingleClientGuard, when enabled (SINGLE_CLIENT_GUARD=true default),
+	// makes the gateway refuse to start while a live official CLI
+	// (freebuff/codebuff) is detected on the host. The CLI and this gateway
+	// are two clients for ONE account — both read the CLI's credentials file,
+	// and AUTO_DISCOVER_TOKEN fills an empty AUTH_TOKENS from it — and
+	// upstream admits one seat per account, so running both produces the
+	// duplicate-client pattern the fork's ban post-mortem (fb986b48) flags.
+	// ADOPT_CLI_SESSION=true is the supported way to run both; this guard
+	// covers the default case. Disable on hosts where the process scan is
+	// meaningless (CI runners, restricted containers).
+	SingleClientGuard bool
 	// MaturityEnabled is the global kill-switch for streak-maturity automation
 	// (MATURITY_ENABLED; default true). When false, no maturity touch ever
 	// fires. When true, touches run live (admit → one minimal turn →

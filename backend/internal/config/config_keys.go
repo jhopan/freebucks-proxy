@@ -70,6 +70,7 @@ type rawConfig struct {
 	ModelUnavailableCacheTTL string          `json:"MODEL_UNAVAILABLE_CACHE_TTL"`
 	WebhookURL               string          `json:"WEBHOOK_URL"`
 	AdoptCLISession          bool            `json:"ADOPT_CLI_SESSION"`
+	SingleClientGuard        bool            `json:"SINGLE_CLIENT_GUARD"`
 	WaitingRoomChain         bool            `json:"WAITING_ROOM_CHAIN"`
 	RateLimitPerIP           *float64        `json:"RATE_LIMIT_PER_IP"`
 	RateLimitBurst           *int            `json:"RATE_LIMIT_BURST"`
@@ -171,6 +172,13 @@ func defaultRawConfig() rawConfig {
 		MaturityEnabled:        true,       // streak maintenance on by default; set MATURITY_ENABLED=false to disable
 		MaturityTouchModel:     "",         // "" = auto: cheapest unmetered catalog row
 		MaturityTargetDays:     ptrInt(7),  // default 7-day streak target
+		// SINGLE_CLIENT_GUARD on by default: the official CLI and this
+		// gateway are two clients for one account (both read the CLI's
+		// credentials file), and upstream admits one seat per account. The
+		// guard refuses to boot while a live CLI is detected rather than
+		// competing for that seat. Set false for hosts where the scan is
+		// meaningless (CI, containers that cannot read the process table).
+		SingleClientGuard: true,
 		// WAITING_ROOM_CHAIN on by default: the fork's own ban post-mortem
 		// (fb986b48) found that queuing WITHOUT producing the waiting_room ad
 		// engagement is the shape upstream flags. The CLI always runs that

@@ -877,3 +877,118 @@ positif-SAMA. Menyetelnya ke 0.0.196 (yang kebetulan sama dengan live) akan
 membuat gate melaporkan SAME dan **melewati klasifikasi drift** yang justru
 sedang ingin menyala. Re-pin yang benar = alur serial wire → registry →
 dashboard, bukan suntingan angka. Sisa: `upstream-repin-3d5300b`.
+
+## 2026-09-25 — pengerasan protokol: guard satu-klien + persona TLS di jalur serve
+
+Lanjutan dari post-mortem ban. Tiga hal dikerjakan: satu enforcement baru, satu
+celah deteksi ditutup, dan satu protokol operasional ditulis.
+
+### 1. Guard satu-klien (`cli_clientguard*.go`, BARU)
+
+CLI resmi dan gateway ini adalah **dua klien untuk SATU akun**, dan bukan cuma
+karena satu mesin: keduanya membaca `~/.config/manicode/credentials.json`, dan
+`AUTO_DISCOVER_TOKEN` (default on) mengisi `AUTH_TOKENS` yang kosong dari file
+itu — jadi gateway otomatis memakai akun yang terakhir dipakai CLI. Terbukti
+saat uji: log boot menampilkan `auto-discovery filled empty AUTH_TOKENS from CLI
+login: bridge mode switched to pooled mode email=jhoosuaapp@molix.tech`.
+
+Upstream hanya mengakui **satu seat per akun**: setiap admission menulis ulang
+`active_instance_id` dan instance yang tergusur ditolak `409
+session_superseded`. Dua klien hidup = pola duplicate-client yang sudah
+ditandai post-mortem ban fork (`fb986b48`).
+
+`Serve` sekarang memindai tabel proses untuk `freebuff`/`codebuff` yang hidup
+dan **menolak boot** saat menemukannya. Knob baru **`SINGLE_CLIENT_GUARD`**
+(default `true`, rantai knob penuh: raw → dotenv → DB overlay →
+`effectiveConfigKV` → keycatalog) mematikannya untuk host yang tabel prosesnya
+tak terbaca/tak bermakna (CI, container terbatas). `ADOPT_CLI_SESSION=true`
+tetap jalur resmi untuk menjalankan keduanya — guard jadi mubazir, bukan mati.
+
+Alasannya `ADOPT_CLI_SESSION` saja tidak cukup: `adoptOrCreate` mempercayai pid
+di `freebuff-instance-owner.json`, dan file itu hanya ditulis ulang saat sesi
+CLI berubah — CLI yang sudah restart meninggalkan pid basi (kasus nyata: file
+menyebut pid 30872 sementara CLI hidup adalah 9332), cek liveness-nya lolos dan
+gateway justru membuat sesi pesaing yang hendak dihindari. Pemindaian proses
+menutup lubang itu.
+
+Guard ini **wajib punya knob**, bukan sekadar demi fleksibilitas: percobaan
+pertama tanpa knob langsung mematikan 4 e2e (`TestE2EServeAndDrain`,
+`TestE2EPortConflict`, `TestE2EConfigJSON`, `TestE2EBridgeMode` — semuanya
+"healthz not met"/"port-conflict stderr missing") karena host pengembang
+menjalankan CLI. Perbaikannya di dua sisi: knob di atas, plus `e2eEnv` di
+`cmd/freebucks-proxy/e2e_test.go` yang kini selalu menyalurkan
+`SINGLE_CLIENT_GUARD=false` supaya suite tidak bergantung pada tabel proses
+host. Menyaring lewat mode (bridge vs pooled) TIDAK menolong: e2e memang
+menyetel `AUTH_TOKENS` eksplisit.
+
+Verifikasi live: binary dijalankan dengan `LISTEN_ADDR=127.0.0.1:34599`,
+`DB_PATH`/`LOG_FILE` diarahkan ke berkas sementara — guard menyala dan menyebut
+`process "freebuff", pid 9332` sebelum `p.Start(ctx)`, jadi tidak ada satu pun
+panggilan upstream yang terjadi. Berkas uji dihapus setelahnya.
+
+Windows memakai snapshot Toolhelp32 (`golang.org/x/sys/windows`), Linux membaca
+`/proc/<pid>/comm`; kegagalan enumerasi = "tidak ada yang berjalan" (guard ini
+jaring pengaman, gateway yang tak bisa membaca tabel proses tetap harus boot).
+Nama dibandingkan **eksak** setelah normalisasi, jadi `freebucks-proxy` (binary
+ini) dan `freebuff-helper` tidak ikut tertangkap.
+
+### 2. Persona TLS kini bersuara di jalur serve (`config/tls_persona.go`, BARU)
+
+Klasifikasi persona dipindah dari `doctor.tlsFingerprintRow` ke
+`config.TLSPersonaWarning` supaya jalur serving bisa memakainya, lalu `Serve`
+**memperingatkan di setiap boot** saat `TLS_FINGERPRINT` adalah persona BROWSER
+(`auto`, `random`, `chrome*`, `safari*`, `firefox*`, `edge126`) sementara
+envelope request mengaku CLI. Sebelumnya ini hanya muncul di `-doctor` yang
+opt-in — itulah sebabnya VPS bisa berjalan dengan `auto` tanpa ada yang tahu.
+`doctor.tlsFingerprintRow` sekarang hanya mendelegasikan (test lama tetap hijau
+karena memakai `strings.Contains`).
+
+Tidak dijadikan error: persona browser adalah kemampuan yang didokumentasikan
+sengaja (`keycatalog.go`, "deliberate WAF evasion only"), dan repo ini tidak
+punya idiom escape-hatch (`grep 'ALLOW_[A-Z_]*"'` kosong) — menambah knob baru
+berarti menempuh rantai knob penuh (dotenv → static → live → SSE hash → store
+refresh). Perbaikan yang diambil adalah menutup celah deteksi, bukan mencabut
+kemampuan.
+
+### 3. `docs/operations/SAFE-ACCOUNT-PROTOCOL.md` (BARU)
+
+Protokol operasional sebelum akun baru dipakai: satu akun satu klien; **jangan
+pernah** memanggil endpoint upstream langsung dengan token asli (penyebab ban
+2026-09-25: ~14 panggilan curl dengan TLS stack curl sambil mengaku
+`User-Agent: Freebuff-CLI/0.0.191`); persona `bun`; batas reputasi IP egress
+yang **tidak bisa** diperbaiki kode (IP datacenter/VPS terbaca `hosting`);
+engagement iklan sebelum admission + endpoint `/api/v1/ads` yang benar;
+waiting room ≠ ban; dan mekanika budget (dua jam reset, charge-once per sesi).
+Ditutup checklist pra-terbang.
+
+### Verifikasi
+
+- `gofmt -l backend/` kosong; `go build ./backend/...` OK; `go vet` pada paket
+  yang berubah bersih.
+- `go test ./backend/...` hijau seluruh paket.
+- Fixture frontend `frontend/e2e/fixtures/config-meta.json` +
+  `frontend/e2e/fixtures-realworld/config-meta.json` di-regenerasi
+  (`FP_REGEN_FIXTURE=1`, lalu prettier dijalankan **dari cwd `frontend/`**)
+  karena `SINGLE_CLIENT_GUARD` menggeser urutan katalog; `npm --prefix frontend
+  run check` → 0 error.
+- `SINGLE_CLIENT_GUARD` harus masuk ke tiga tempat yang saling dijaga test,
+  bukan hanya katalog: `dotenvKeys` (keycatalog_test.go),
+  `restartOnlyConfigKeys` (server/admin_env.go — `TestConfigCatalogRestartOnly
+  MatchesServer`), dan `effectiveConfigKV` (data.go). Urutan katalog dalam grup
+  wajib byte-ascending (`TestCatalogOrdered`), jadi entri diletakkan di antara
+  `SESSION_STATE_FILE` dan `SLOTS_PER_ACCOUNT`.
+- Test baru: `TestSingleClientRefusal` (tabel keputusan guard, scan di-inject
+  supaya hermetik), `TestIsOfficialCLIName` (nama mirip tidak boleh tertangkap),
+  `TestNormalizeProcName`, dan `TestTLSPersonaWarning`.
+- **Koreksi catatan lama**: kegagalan build lintas-kompilasi yang "senyap"
+  (`go build -o` tidak menghasilkan berkas) BUKAN masalah Go — sandbox menolak
+  tulis ke luar workspace (`/c/tmp`). Build ke dalam repo berhasil normal.
+
+### Sisa / belum
+
+- Proses `freebuff.exe` pid 9332 masih hidup dan **tidak bisa dimatikan** dari
+  sesi ini (`Access is denied`, juga di luar sandbox — kemungkinan dijalankan
+  elevated). Guard sudah menahan gateway, tapi akun baru tetap butuh CLI ini
+  ditutup manual.
+- `UPSTREAM_EGRESS_URL` masih inert + masih menyimpang dari rantai knob; opsi
+  A/B/C/D di entri sebelumnya masih menunggu pemilik repo.

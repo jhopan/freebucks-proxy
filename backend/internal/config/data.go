@@ -143,6 +143,8 @@ func renderKey(c *Config, key string) (val string, valueIsSecret bool) {
 		return strconv.FormatBool(c.DevToolsEnabled), false
 	case "ADOPT_CLI_SESSION":
 		return strconv.FormatBool(c.AdoptCLISession), false
+	case "SINGLE_CLIENT_GUARD":
+		return strconv.FormatBool(c.SingleClientGuard), false
 	case "WAITING_ROOM_CHAIN":
 		return strconv.FormatBool(c.WaitingRoomChain), false
 	case "SLOTS_PER_ACCOUNT":

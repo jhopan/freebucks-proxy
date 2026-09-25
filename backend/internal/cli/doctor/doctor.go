@@ -98,27 +98,11 @@ func bridgeModeWarning() string {
 // tlsFingerprintRow reports the configured TLS fingerprint against the CLI
 // persona, returning the line to print and whether it is a warning.
 //
-// The gateway impersonates the official FreeBuff CLI, which speaks
-// Bun/BoringSSL and sends NO browser headers. `bun` is the byte-accurate
-// capture of that ClientHello (docs/operations/bun-1.3.14-clienthello.txt),
-// so it is the only self-consistent choice. `auto` and `random` resolve to a
-// BROWSER preset (stealth.GetProfileForConnection: chrome126/firefox128/
-// safari18/edge126) carrying a browser User-Agent and Sec-CH-UA — the
-// TLS/header persona then says "browser" while the request envelope says
-// "CLI", and the upstream admission lane fingerprints both. Empty stays the
-// plain-Go default (no utls persona at all).
+// The classification lives in config.TLSPersonaWarning so the serving path
+// can log the same finding at startup (config/tls_persona.go carries the
+// reasoning); the doctor only renders it.
 func tlsFingerprintRow(name string) (string, bool) {
-	norm := strings.ToLower(strings.TrimSpace(name))
-	switch norm {
-	case "":
-		return "TLS_FINGERPRINT unset: plain Go TLS on every dial (no utls persona)", false
-	case "bun":
-		return "TLS_FINGERPRINT=bun: exact Bun 1.3.14 ClientHello, no browser headers (CLI-faithful)", false
-	case "auto", "random":
-		return fmt.Sprintf("TLS_FINGERPRINT=%s resolves to a BROWSER preset (chrome126/firefox128/safari18/edge126) with a browser User-Agent and Sec-CH-UA, but the request envelope impersonates the CLI -- a persona contradiction the upstream admission lane fingerprints. Prefer TLS_FINGERPRINT=bun for the CLI's own ClientHello.", norm), true
-	default:
-		return fmt.Sprintf("TLS_FINGERPRINT=%s is a browser TLS persona while the gateway impersonates the CLI (Bun, no browser headers). Prefer TLS_FINGERPRINT=bun unless browser evasion is deliberate.", norm), true
-	}
+	return config.TLSPersonaWarning(name)
 }
 
 // doctorSummary renders the doctor's closing summary line.

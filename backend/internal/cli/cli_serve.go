@@ -103,6 +103,14 @@ func Serve(configPath string, verbose bool, version string) int {
 		}
 	}
 	logger.Info("config loaded", "env_file", envFile, "config_file", configPath)
+	// CLI-persona consistency: the gateway impersonates the official CLI, so
+	// a BROWSER TLS persona (auto/random/chrome/safari/firefox/edge)
+	// contradicts the request envelope upstream fingerprints. -doctor prints
+	// this too, but the doctor is opt-in — a misconfigured deployment (the
+	// VPS ran `auto`) otherwise never sees it, so log it on every boot.
+	if msg, warn := config.TLSPersonaWarning(cfg.TLSFingerprint); warn {
+		logger.Warn("TLS persona contradicts the CLI request envelope: " + msg)
+	}
 	if cfg.EnvFile == "" {
 		if cwd, err := os.Getwd(); err == nil {
 			exe, exeErr := os.Executable()
@@ -412,6 +420,19 @@ func Serve(configPath string, verbose bool, version string) int {
 			sess.SetCLIAdoption(session.CLIAdoption{Enabled: true, OwnerFile: ownerFile})
 		}
 		logger.Info("ADOPT_CLI_SESSION: adopting the official CLI session (single-session friendly)", "owner_file", ownerFile)
+	}
+
+	// Single-client guard: the CLI and this gateway are two clients for one
+	// account, and upstream admits one seat per account. ADOPT_CLI_SESSION
+	// (above) is the supported way to run both, but it trusts a pid from the
+	// CLI's owner file that goes stale across a CLI restart — so with the
+	// default (false) this refuses to boot rather than silently claim the
+	// seat out from under a live CLI. See cli_clientguard.go.
+	if msg := singleClientRefusal(cfg.SingleClientGuard, cfg.AdoptCLISession); msg != "" {
+		logger.Error("refusing to start: " + msg)
+		fmt.Fprintln(os.Stderr, "freebucks-proxy: "+msg)
+		holdForExitIfConsole()
+		return 1
 	}
 
 	// Prewarm + the 60s maintain loop run until ctx is canceled (shutdown).

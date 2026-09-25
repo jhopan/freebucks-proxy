@@ -403,6 +403,17 @@
     "description": "Path of the session state file (used when SESSION_PERSIST=true; token-keyed, 0600, raw tokens never written)."
   },
   {
+    "key": "SINGLE_CLIENT_GUARD",
+    "group": "pool",
+    "kind": "bool",
+    "default": "true",
+    "restart_only": true,
+    "secret": false,
+    "essential": false,
+    "hidden": true,
+    "description": "Refuse to start while a live official CLI (freebuff/codebuff) is detected on this host. The CLI and this gateway are two clients for ONE account — both read the CLI's credentials file and upstream admits one seat per account — so running both supersedes sessions (409) and is the duplicate-client pattern the ban post-mortem flags. ADOPT_CLI_SESSION=true is the supported way to run both. Set false where the process scan is meaningless (CI, restricted containers)."
+  },
+  {
     "key": "SLOTS_PER_ACCOUNT",
     "group": "pool",
     "kind": "int",

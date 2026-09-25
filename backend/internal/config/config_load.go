@@ -117,6 +117,7 @@ func LoadOpts(configPath string, opts LoadOptions) (Config, error) {
 	overrideString(&raw.ModelUnavailableCacheTTL, "MODEL_UNAVAILABLE_CACHE_TTL")
 	overrideString(&raw.WebhookURL, "WEBHOOK_URL")
 	overrideBool(&raw.AdoptCLISession, "ADOPT_CLI_SESSION")
+	overrideBool(&raw.SingleClientGuard, "SINGLE_CLIENT_GUARD")
 	overrideInt(&raw.SlotsPerAccount, "SLOTS_PER_ACCOUNT")
 	overrideString(&raw.QueueWait, "QUEUE_WAIT")
 	overrideInt(&raw.QueueDepth, "QUEUE_DEPTH")
@@ -435,6 +436,7 @@ func LoadOpts(configPath string, opts LoadOptions) (Config, error) {
 		QueueDepth:               queueDepth,
 		MaxSpillAccounts:         maxSpillAccounts,
 		AdoptCLISession:          raw.AdoptCLISession,
+		SingleClientGuard:        raw.SingleClientGuard,
 		WaitingRoomChain:         raw.WaitingRoomChain,
 		RateLimitPerIP:           rateLimitPerIP,
 		RateLimitBurst:           rateLimitBurst,
@@ -617,6 +619,7 @@ func applyMappedValues(raw *rawConfig, get func(string) string) {
 	overrideStringFrom(&raw.ModelUnavailableCacheTTL, get, "MODEL_UNAVAILABLE_CACHE_TTL")
 	overrideStringFrom(&raw.WebhookURL, get, "WEBHOOK_URL")
 	overrideBoolFrom(&raw.AdoptCLISession, get, "ADOPT_CLI_SESSION")
+	overrideBoolFrom(&raw.SingleClientGuard, get, "SINGLE_CLIENT_GUARD")
 	overrideIntFrom(&raw.SlotsPerAccount, get, "SLOTS_PER_ACCOUNT")
 	overrideStringFrom(&raw.QueueWait, get, "QUEUE_WAIT")
 	overrideIntFrom(&raw.QueueDepth, get, "QUEUE_DEPTH")

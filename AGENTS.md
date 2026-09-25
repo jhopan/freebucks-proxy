@@ -2,7 +2,10 @@
 
 Machine-readable rules for agents working in this repo. Human overview lives in
 `README.md`; visual grammar in `DESIGN.md`; multi-agent workflow in
-`devdocs/AGENTIC-WORKFLOW.md`.
+`devdocs/AGENTIC-WORKFLOW.md`; **account-safety rules in
+`docs/operations/SAFE-ACCOUNT-PROTOCOL.md` — read that before pointing a real
+account at the gateway.** A ban is terminal, and the 2026-09-25 account was
+lost to hand-run `curl` calls against upstream with a real token.
 
 ## 1. Identity
 

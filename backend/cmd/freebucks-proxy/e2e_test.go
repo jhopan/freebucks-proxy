@@ -143,7 +143,12 @@ func proxyInDir(t *testing.T, dir string) string {
 func e2eEnv(t *testing.T, overrides ...string) []string {
 	t.Helper()
 	testutil.UnsetConfigEnv(t)
-	return append(os.Environ(), overrides...)
+	// SINGLE_CLIENT_GUARD=false keeps the suite host-independent: the guard
+	// refuses to start while a live freebuff/codebuff process is detected,
+	// so a developer running the CLI would otherwise fail every Serve test.
+	// Callers may still override it (their entry wins, being later).
+	base := append([]string{"SINGLE_CLIENT_GUARD=false"}, overrides...)
+	return append(os.Environ(), base...)
 }
 
 // freePort reserves a free loopback port and returns it. The listener is
