@@ -89,6 +89,28 @@ indefinitely — the VPS did, on `auto`. The serving path now **logs a warning o
 every boot** when the persona contradicts the envelope
 (`backend/internal/config/tls_persona.go`, shared with `-doctor`).
 
+### 3a. `HTTP2_UPSTREAM` must be `false` with `bun`
+
+The profile is only half the ClientHello; the ALPN list is the other half, and
+`HTTP2_UPSTREAM` **rewrites it on every dial**. `stealth.Dialer` pins ALPN by
+*replacing* the spec's own ALPN extension in place (`stealth/tls.go:102`,
+`setALPN`), and the client passes `["h2","http/1.1"]` whenever the knob is on.
+
+The Bun capture advertises `http/1.1` **alone** — visible in the raw record
+(`0010000b000908 687474702f312e31`: one entry) and taken from a live CLI
+0.0.194 over a MITM CONNECT. So `bun` + `HTTP2_UPSTREAM=true` yields a hello
+that matches **neither** Bun nor Chrome: the extension order and ciphers are
+Bun's, the ALPN list is Chrome's. JA3 is unaffected (it hashes extension types,
+not ALPN values), but **JA4 reads the ALPN list**.
+
+The knob's own rationale — issue #51, "real browsers advertise h2,http/1.1" —
+is browser-specific and does not transfer to a CLI persona. With
+`TLS_FINGERPRINT=bun`, set `HTTP2_UPSTREAM=false`.
+
+Enforced like the persona rule: `-doctor` prints it and Serve logs it on every
+boot (`config.ALPNPersonaWarning`). It fires only for CLI-faithful profiles, so
+a browser preset (which legitimately wants h2) is not flagged.
+
 > Do not set `TLS_FINGERPRINT` and `UPSTREAM_EGRESS_URL` together: the stealth
 > dialer replaces the relay's `DialTLSContext`, so the relay is never used.
 > The client warns about this.
@@ -165,8 +187,9 @@ Do not confuse the two — they need opposite responses:
 
 1. **Close the official CLI** — confirm no `freebuff` / `codebuff` process is
    running. The gateway now refuses to start otherwise.
-2. **Set `TLS_FINGERPRINT=bun`.** Watch the boot log for the persona warning; it
-   must not appear.
+2. **Set `TLS_FINGERPRINT=bun` and `HTTP2_UPSTREAM=false`.** Watch the boot log
+   for the persona and ALPN warnings; neither must appear. `HTTP2_UPSTREAM=true`
+   rewrites the CLI's `http/1.1`-only ALPN into `h2,http/1.1` (§3a).
 3. **Run on a residential egress**, not a VPS.
 4. **Leave `WAITING_ROOM_CHAIN` at its default (on).**
 5. **Verify with `-doctor`**, not with curl. Expect the token probe to pass and

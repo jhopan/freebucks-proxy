@@ -105,6 +105,19 @@ func tlsFingerprintRow(name string) (string, bool) {
 	return config.TLSPersonaWarning(name)
 }
 
+// http2ALPNRow reports whether HTTP2_UPSTREAM rewrites the ALPN list of the
+// configured profile's own ClientHello. HTTP2_UPSTREAM pins ALPN per dial
+// (stealth.setALPN replaces the spec's ALPN extension in place), so it must
+// agree with the CLI-faithful capture, which advertises http/1.1 alone.
+//
+// The classification lives in config.ALPNPersonaWarning so the serving path
+// logs the same finding at startup (config/tls_persona.go carries the
+// reasoning); the doctor only renders it. Empty when the profile is not
+// CLI-faithful -- there is then no CLI hello for the ALPN list to contradict.
+func http2ALPNRow(tlsFingerprint string, http2Upstream bool) (string, bool) {
+	return config.ALPNPersonaWarning(tlsFingerprint, http2Upstream)
+}
+
 // doctorSummary renders the doctor's closing summary line.
 func doctorSummary(passed, warnings, failed int) string {
 	return fmt.Sprintf("\nSummary: %d passed, %d warnings, %d failed", passed, warnings, failed)
@@ -200,6 +213,16 @@ func Run(configPath string) {
 		warn(msg)
 	} else {
 		ok(msg)
+	}
+
+	// ALPN: HTTP2_UPSTREAM pins the ALPN list on every dial, so it must agree
+	// with the CLI-faithful hello's own list (http/1.1 alone).
+	if msg, w := http2ALPNRow(cfg.TLSFingerprint, cfg.HTTP2Upstream); msg != "" {
+		if w {
+			warn(msg)
+		} else {
+			ok(msg)
+		}
 	}
 
 	// Port availability check

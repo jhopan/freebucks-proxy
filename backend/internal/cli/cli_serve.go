@@ -111,6 +111,14 @@ func Serve(configPath string, verbose bool, version string) int {
 	if msg, warn := config.TLSPersonaWarning(cfg.TLSFingerprint); warn {
 		logger.Warn("TLS persona contradicts the CLI request envelope: " + msg)
 	}
+	// ALPN consistency: HTTP2_UPSTREAM pins the ALPN list on every dial
+	// (stealth.setALPN replaces the spec's own ALPN extension in place), so it
+	// must agree with the CLI-faithful profile's list. The mismatch is
+	// invisible until JA4 is read, so log it on every boot rather than waiting
+	// for -doctor.
+	if msg, warn := config.ALPNPersonaWarning(cfg.TLSFingerprint, cfg.HTTP2Upstream); warn {
+		logger.Warn("HTTP2_UPSTREAM contradicts the CLI-faithful TLS persona: " + msg)
+	}
 	if cfg.EnvFile == "" {
 		if cwd, err := os.Getwd(); err == nil {
 			exe, exeErr := os.Executable()

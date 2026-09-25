@@ -992,3 +992,80 @@ Ditutup checklist pra-terbang.
   ditutup manual.
 - `UPSTREAM_EGRESS_URL` masih inert + masih menyimpang dari rantai knob; opsi
   A/B/C/D di entri sebelumnya masih menunggu pemilik repo.
+
+## 2026-09-25 — reverse-engineering `ACTING_USER_ID` + koreksi ALPN (`HTTP2_UPSTREAM`)
+
+### Sumber nilai ajaib: overlay settings di DB, bukan `.env`/systemd
+
+`ACTING_USER_ID=bb0cd5a3-…` tetap terkirim walau barisnya sudah dikomentari di
+`/opt/freebuff-proxy/.env`. Sumbernya ternyata **overlay settings DB**: tabel
+`settings`, key `config:ACTING_USER_ID` (prefix `config:`), diterapkan lewat
+`applySettingsOverlay`/`OverlayFromRows`. Urutan presedensi yang terbaca dari
+kode (`config_load.go:51-61`):
+
+    default/JSON  ->  .env (applyDotenv)  ->  overlay DB  ->  env proses asli
+
+komentar di sumber: *"DB settings overlay (ADR-0019): beats the file, loses to
+explicit process env"*. Jadi **berkas `.env` KALAH dari overlay DB**, dan nilai
+kosong di DB = "tanpa override" (`override()` melewati nilai kosong). Itu
+sebabnya `.env TLS_FINGERPRINT=bun` menang atas `config:TLS_FINGERPRINT=''` —
+tapi kesimpulan lama "`.env` mengalahkan DB" hanya benar untuk kasus nilai DB
+kosong. **Koreksi.**
+
+Tindakan: baris `config:ACTING_USER_ID` dihapus (backup
+`data/freebuff.db.bak-pre-acting`). Bukti: boot 15:45:19 masih mencatat
+`acting user id set`, boot 15:51:57 tidak.
+
+### Cacat protokol: `HTTP2_UPSTREAM=true` merusak ALPN persona `bun`
+
+`stealth.Dialer` memanggil `setALPN(uConn, alpn)` (`stealth/tls.go:102`) yang
+**mengganti** ekstensi ALPN milik spec in-place; `upstream/client.go` mengirim
+`["h2","http/1.1"]` saat `HTTP2_UPSTREAM` aktif. Spec Bun memaku `["http/1.1"]`
+(`bun_spec_test.go`), dan capture CLI live 0.0.194 juga satu entri
+(`docs/operations/bun-1.3.14-clienthello.txt`, terlihat di record mentah
+`0010000b000908 687474702f312e31`). Jadi `bun` + h2 = ClientHello yang cocok
+dengan Bun **maupun** Chrome-tidak. JA3 tidak terpengaruh (ia meng-hash tipe
+ekstensi), **JA4 membaca daftar ALPN**. Rasional knob ini (#51, "real browsers
+advertise h2,http/1.1") khusus browser dan tidak berlaku untuk persona CLI.
+
+VPS `vps-natusa` memang menjalankan `config:HTTP2_UPSTREAM=true` (di DB),
+sementara `.env` sudah `TLS_FINGERPRINT=bun`. Perbaikan:
+
+- baris DB `config:HTTP2_UPSTREAM` **dihapus**, nilai dipindah ke `.env` sebagai
+  `HTTP2_UPSTREAM=false` — tier yang ditulis dashboard, jadi tidak ada lagi
+  bayangan DB yang membuat suntingan dashboard tampak "tidak tersimpan".
+- backup: `.env.bak-pre-http2`, `data/freebuff.db.bak-pre-http2`.
+- bukti: boot log `applying 46 DB setting override(s)` (dari 47), healthz 200,
+  `env_file=/opt/freebuff-proxy/.env`.
+
+### Penjaga kode
+
+- `config.CLIFaithfulProfile(name)` — satu sumber kebenaran untuk "profil ini
+  mereproduksi ClientHello CLI sendiri" (kini hanya `bun`). `TLSPersonaWarning`
+  dan `ALPNPersonaWarning` sama-sama memakai predikat ini, jadi capture baru
+  yang ditambahkan otomatis ikut kedua aturan.
+- `config.ALPNPersonaWarning(name, http2Upstream)` — memperingatkan `bun` + h2,
+  memberi baris `ok` saat `false`, dan `("", false)` untuk profil non-CLI
+  (preset browser memang menginginkan h2, plain Go tidak memaku ALPN).
+- Dipakai di dua jalur: `cli_serve.go` (WARN setiap boot) dan `doctor.go`
+  (`http2ALPNRow`, baris baru di `-doctor`).
+- Test: `TestCLIFaithfulProfile`, `TestALPNPersonaWarning`, `TestHTTP2ALPNRow`.
+- `bun_spec_test.go` tidak menangkap cacat ini karena ia menguji `bunSpec()`
+  **sebelum** `setALPN` menyentuhnya — pin itu tetap benar dan tidak diubah.
+
+### Verifikasi
+
+- `gofmt -l backend/` kosong; `go build ./...` OK; `go vet ./...` bersih.
+- `go test ./...` di `backend/` **hijau seluruh paket** (exit 0), termasuk e2e
+  `cmd/freebucks-proxy` (53s) dan `internal/archtest`.
+- VPS: `1.19.2.15`, `active`, healthz `status:ok`, override DB 47 → 46, tanpa
+  baris `acting user id set`.
+
+### Sisa / belum
+
+- **Proses `freebuff.exe` pid 9332 masih hidup di host ini** dan tidak bisa
+  dimatikan dari sesi agent (`Access is denied`, juga di luar sandbox). Guard
+  menahan gateway, tapi login akun baru tetap butuh CLI ditutup manual.
+- Penjaga ALPN baru **belum ter-deploy** ke VPS — binary `1.19.2.15` di sana
+  dibangun sebelum perubahan ini, jadi peringatan boot-nya belum aktif.
+- `UPSTREAM_EGRESS_URL` masih inert; opsi A/B/C/D masih menunggu pemilik repo.

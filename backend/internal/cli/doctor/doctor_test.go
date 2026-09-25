@@ -155,6 +155,43 @@ func TestTLSFingerprintRow(t *testing.T) {
 	}
 }
 
+// TestHTTP2ALPNRow pins the ALPN rule found on the VPS: HTTP2_UPSTREAM pins
+// the ALPN list on every dial (stealth.setALPN replaces the spec's own ALPN
+// extension in place), so it contradicts the CLI-faithful capture (whose
+// ClientHello advertises http/1.1 only). Non-CLI profiles are out of scope:
+// a browser preset wants h2, and plain Go has no pinned ALPN at all.
+func TestHTTP2ALPNRow(t *testing.T) {
+	cases := []struct {
+		name      string
+		in        string
+		http2     bool
+		wantEmpty bool
+		wantWarn  bool
+		contains  string
+	}{
+		{"bun with h2 contradicts the capture", "bun", true, false, true, "HTTP2_UPSTREAM=false"},
+		{"bun with h1 is faithful", "bun", false, false, false, "http/1.1"},
+		{"bun is case-insensitive", "BUN", true, false, true, "HTTP2_UPSTREAM=false"},
+		{"unset has no CLI hello", "", true, true, false, ""},
+		{"browser preset wants h2", "chrome126", true, true, false, ""},
+		{"auto is a browser preset", "auto", true, true, false, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			msg, warn := http2ALPNRow(tc.in, tc.http2)
+			if (msg == "") != tc.wantEmpty {
+				t.Errorf("http2ALPNRow(%q, %v) msg = %q, wantEmpty = %v", tc.in, tc.http2, msg, tc.wantEmpty)
+			}
+			if warn != tc.wantWarn {
+				t.Errorf("http2ALPNRow(%q, %v) warn = %v, want %v", tc.in, tc.http2, warn, tc.wantWarn)
+			}
+			if tc.contains != "" && !strings.Contains(msg, tc.contains) {
+				t.Errorf("http2ALPNRow(%q, %v) = %q, want it to mention %q", tc.in, tc.http2, msg, tc.contains)
+			}
+		})
+	}
+}
+
 // TestSharedSubnetworkAdvisory pins the issue #140 print: every pooled
 // token in one deployment shares one egress /24, so the doctor always
 // prints a shared-network advisory when 2+ tokens are configured. Single-
