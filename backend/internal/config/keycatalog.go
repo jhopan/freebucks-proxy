@@ -354,7 +354,7 @@ var keyCatalog = []KeyDef{
 	},
 	{
 		Key: "TLS_FINGERPRINT", Group: GroupUpstream, Kind: "select",
-		Enum:        []string{"auto", "chrome120", "chrome126", "safari17", "safari18", "firefox120", "firefox128", "edge126", "random"},
+		Enum:        []string{"auto", "bun", "chrome120", "chrome126", "safari17", "safari18", "firefox120", "firefox128", "edge126", "random"},
 		RestartOnly: true, Default: "", Hidden: true,
 		Description: `TLS fingerprint for upstream egress (empty = plain Go/Bun baseline, CLI-faithful; auto/browser values use utls to mimic browser JA3 for WAF evasion on datacenter IPs).`,
 	},

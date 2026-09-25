@@ -103,10 +103,10 @@ func (c Config) Validate() error {
 
 	if c.TLSFingerprint != "" {
 		switch strings.ToLower(c.TLSFingerprint) {
-		case "chrome120", "chrome126", "safari17", "safari18", "firefox120", "firefox128", "edge126", "random", "auto":
+		case "chrome120", "chrome126", "safari17", "safari18", "firefox120", "firefox128", "edge126", "bun", "random", "auto":
 			// valid
 		default:
-			return fmt.Errorf("TLS_FINGERPRINT %q must be one of: chrome120, chrome126, safari17, safari18, firefox120, firefox128, edge126, random, auto", c.TLSFingerprint)
+			return fmt.Errorf("TLS_FINGERPRINT %q must be one of: chrome120, chrome126, safari17, safari18, firefox120, firefox128, edge126, bun, random, auto", c.TLSFingerprint)
 		}
 	}
 

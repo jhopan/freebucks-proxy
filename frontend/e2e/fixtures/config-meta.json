@@ -593,6 +593,7 @@
     "kind": "select",
     "enum": [
       "auto",
+      "bun",
       "chrome120",
       "chrome126",
       "safari17",

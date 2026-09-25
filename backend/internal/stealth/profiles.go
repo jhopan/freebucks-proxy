@@ -33,6 +33,7 @@ const (
 	ProfileIDFirefox120 ProfileID = "firefox120"
 	ProfileIDFirefox128 ProfileID = "firefox128"
 	ProfileIDEdge126    ProfileID = "edge126"
+	ProfileIDBun        ProfileID = "bun"
 	ProfileIDRandom     ProfileID = "random"
 	ProfileIDAuto       ProfileID = "auto"
 )
@@ -52,6 +53,22 @@ type Profile struct {
 
 // Pre-built browser profiles.
 var (
+	// ProfileBun sends the CLI's OWN TLS hello: the exact Bun 1.3.14
+	// ClientHello captured live from the shipped CLI binary (see
+	// docs/operations/bun-1.3.14-clienthello.txt). Headers stay absent — the
+	// real CLI sends no browser headers — so this profile is the closest
+	// possible persona to the genuine upstream client. No GREASE (Bun 1.3.x
+	// BoringSSL build sends none), no HTTP/2 ALPN (http/1.1 only), and the
+	// signature extension order is byte-accurate.
+	ProfileBun = &Profile{
+		ID:             ProfileIDBun,
+		ClientHelloID:  utls.HelloCustom,
+		CustomSpec:     bunSpec(),
+		UserAgent:      "", // real CLI sends no UA
+		AcceptLanguage: "",
+		AcceptEncoding: "",
+	}
+
 	// ProfileChrome120 mimics Chrome 120 on Windows.
 	ProfileChrome120 = &Profile{
 		ID:              ProfileIDChrome120,
@@ -196,6 +213,8 @@ func Lookup(name string) (*Profile, bool) {
 		return ProfileFirefox128, true
 	case "edge126", "edge":
 		return ProfileEdge126, true
+	case "bun":
+		return ProfileBun, true
 	case "random":
 		return ProfileRandom, true
 	case "auto":
@@ -346,6 +365,70 @@ func safari17Spec() *utls.ClientHelloSpec {
 			}},
 			&utls.UtlsGREASEExtension{},
 			&utls.UtlsPaddingExtension{GetPaddingLen: utls.BoringPaddingStyle},
+		},
+	}
+}
+
+// bunSpec returns the exact Bun 1.3.14 ClientHelloSpec captured live from the
+// shipped CLI (docs/operations/bun-1.3.14-clienthello.txt). Extension ORDER is
+// significant and matches the wire capture; there is no GREASE in Bun 1.3.x
+// (its BoringSSL build omits it) and ALPN is http/1.1 only.
+func bunSpec() *utls.ClientHelloSpec {
+	return &utls.ClientHelloSpec{
+		CipherSuites: []uint16{
+			0x1301, // TLS_AES_128_GCM_SHA256
+			0x1302, // TLS_AES_256_GCM_SHA384
+			0x1303, // TLS_CHACHA20_POLY1305_SHA256
+			0xc02b, // ECDHE_ECDSA_AES128_GCM
+			0xc02f, // ECDHE_RSA_AES128_GCM
+			0xc02c, // ECDHE_ECDSA_AES256_GCM
+			0xc030, // ECDHE_RSA_AES256_GCM
+			0xcca9, // ECDHE_ECDSA_CHACHA20
+			0xcca8, // ECDHE_RSA_CHACHA20
+			0xc009, // ECDHE_ECDSA_AES128_CBC
+			0xc013, // ECDHE_RSA_AES128_CBC
+			0xc00a, // ECDHE_ECDSA_AES256_CBC
+			0xc014, // ECDHE_RSA_AES256_CBC
+			0x009c, // RSA_AES128_GCM
+			0x009d, // RSA_AES256_GCM
+			0x002f, // RSA_AES128_CBC
+			0x0035, // RSA_AES256_CBC
+		},
+		CompressionMethods: []byte{0},
+		Extensions: []utls.TLSExtension{
+			&utls.SNIExtension{},
+			&utls.ExtendedMasterSecretExtension{},
+			&utls.RenegotiationInfoExtension{Renegotiation: utls.RenegotiateOnceAsClient},
+			&utls.SupportedCurvesExtension{Curves: []utls.CurveID{
+				utls.X25519,
+				utls.CurveP256,
+				utls.CurveP384,
+			}},
+			&utls.SupportedPointsExtension{SupportedPoints: []byte{0}},
+			&utls.SessionTicketExtension{},
+			&utls.ALPNExtension{AlpnProtocols: []string{"http/1.1"}},
+			&utls.StatusRequestExtension{},
+			&utls.SignatureAlgorithmsExtension{SupportedSignatureAlgorithms: []utls.SignatureScheme{
+				0x0403, // ecdsa_secp256r1_sha256
+				0x0804, // rsa_pss_rsae_sha256
+				0x0401, // rsa_pkcs1_sha256
+				0x0503, // ecdsa_secp384r1_sha384
+				0x0805, // rsa_pss_rsae_sha384
+				0x0501, // rsa_pkcs1_sha384
+				0x0806, // rsa_pss_rsae_sha512
+				0x0601, // rsa_pkcs1_sha512
+				0x0201, // rsa_pkcs1_sha1
+			}},
+			&utls.SCTExtension{},
+			&utls.KeyShareExtension{KeyShares: []utls.KeyShare{
+				{Group: utls.X25519},
+			}},
+			&utls.PSKKeyExchangeModesExtension{Modes: []uint8{1}},
+			&utls.SupportedVersionsExtension{Versions: []uint16{
+				utls.VersionTLS13,
+				utls.VersionTLS12,
+			}},
+			&utls.UtlsPaddingExtension{GetPaddingLen: func(clientHelloUnpaddedLen int) (paddingLen int, willPad bool) { return 232, true }},
 		},
 	}
 }
