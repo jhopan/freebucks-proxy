@@ -37,9 +37,13 @@ func TestChatWaitingRoomRetriedSameSession(t *testing.T) {
 		_, _ = w.Write([]byte("data: " + chunk("cmpl-test", 1234567890, `"choices":[{"delta":{"content":"ok"},"index":0}]`) + "\n\n"))
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 	}
-	// The shared test stack zero-values TRANSIENT_RETRIES (retries off),
-	// so opt into the one budgeted same-session retry explicitly.
-	ts, _ := newTestServerCfg(t, nil, func(cfg *config.Config) { cfg.TransientRetries = 1 }, mock)
+	// The shared test stack zero-values WAITING_ROOM_RETRIES (waiting-room
+	// retries off), so opt into the one budgeted same-session retry
+	// explicitly. TRANSIENT_RETRIES is a different class and stays off.
+	ts, _ := newTestServerCfg(t, nil, func(cfg *config.Config) {
+		cfg.TransientRetries = 0
+		cfg.WaitingRoomRetries = 1
+	}, mock)
 
 	resp, data := doJSON(t, http.MethodPost, ts.URL+"/v1/chat/completions", chatBody(modelA), nil)
 	if resp.StatusCode != http.StatusOK {
@@ -53,16 +57,16 @@ func TestChatWaitingRoomRetriedSameSession(t *testing.T) {
 	}
 }
 
-// TestChatWaitingRoomExpiredStill503: with TRANSIENT_RETRIES=0 (exhausted
-// budget) a persistent 503 must still surface as 503 waiting_room_queued
-// with a Retry-After honor window (10s floor when upstream sends none) —
-// never a bare retry-now 503.
+// TestChatWaitingRoomExpiredStill503: with WAITING_ROOM_RETRIES=0
+// (exhausted budget) a persistent 503 must still surface as 503
+// waiting_room_queued with a Retry-After honor window (10s floor when
+// upstream sends none) — never a bare retry-now 503.
 func TestChatWaitingRoomExpiredStill503(t *testing.T) {
 	mock := testutil.NewMock()
 	defer mock.Close()
 	mock.ChatStatus = http.StatusServiceUnavailable
 	mock.ChatErrorBody = `{"error":{"message":"The model is temporarily unavailable. Please try again later.","code":503}}`
-	ts, _ := newTestServerCfg(t, nil, func(cfg *config.Config) { cfg.TransientRetries = 0 }, mock)
+	ts, _ := newTestServerCfg(t, nil, func(cfg *config.Config) { cfg.WaitingRoomRetries = 0 }, mock)
 
 	resp, data := doJSON(t, http.MethodPost, ts.URL+"/v1/chat/completions", chatBody(modelA), nil)
 	if resp.StatusCode != http.StatusServiceUnavailable {

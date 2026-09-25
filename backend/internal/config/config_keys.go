@@ -56,6 +56,7 @@ type rawConfig struct {
 	RequestJitter            string          `json:"REQUEST_JITTER"`
 	CLIVersion               string          `json:"CLI_VERSION"`
 	TransientRetries         *int            `json:"TRANSIENT_RETRIES"`
+	WaitingRoomRetries       *int            `json:"WAITING_ROOM_RETRIES"`
 	SessionPersist           bool            `json:"SESSION_PERSIST"`
 	SessionStateFile         string          `json:"SESSION_STATE_FILE"`
 	HTTP2Upstream            bool            `json:"HTTP2_UPSTREAM"`
@@ -153,6 +154,7 @@ func defaultRawConfig() rawConfig {
 		RequestJitter:          "",    // "" = disabled (unset → SAFE_MODE preset may fill)
 		CLIVersion:             "0.10.7",
 		TransientRetries:       nil,  // nil = 1 (one retry after a transient transport failure; 0 disables)
+		WaitingRoomRetries:     nil,  // nil = 4 (waiting-room retries ride out an admission queue; 0 surfaces the 503 at once)
 		SessionPersist:         true, // session persistence on by default: restart resumes unexpired sessions
 		SessionStateFile:       ".freebuff-session-state.json",
 		HTTP2Upstream:          true,       // h2 ALPN matches real browsers (reference proxy-freebuff USE_HTTP2 default '1'); HTTP2_UPSTREAM=false forces h1 (#51)
@@ -169,6 +171,12 @@ func defaultRawConfig() rawConfig {
 		MaturityEnabled:        true,       // streak maintenance on by default; set MATURITY_ENABLED=false to disable
 		MaturityTouchModel:     "",         // "" = auto: cheapest unmetered catalog row
 		MaturityTargetDays:     ptrInt(7),  // default 7-day streak target
+		// WAITING_ROOM_CHAIN on by default: the fork's own ban post-mortem
+		// (fb986b48) found that queuing WITHOUT producing the waiting_room ad
+		// engagement is the shape upstream flags. The CLI always runs that
+		// surface while it waits, so shipping it off was the deviation.
+		// WAITING_ROOM_CHAIN=false restores the old opt-in behavior.
+		WaitingRoomChain: true,
 	}
 }
 

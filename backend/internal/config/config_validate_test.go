@@ -339,6 +339,49 @@ func TestTransientRetries(t *testing.T) {
 	t.Setenv("TRANSIENT_RETRIES", "")
 }
 
+// TestWaitingRoomRetries pins the separate waiting-room budget: default 4
+// (the CLI rides out an admission queue for minutes), explicit 0 surfaces the
+// 503 at once, and a negative value rejects the config.
+func TestWaitingRoomRetries(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("AUTH_TOKENS", "tok-1")
+
+	// default: 4 (the vendor poll backoff makes ~2-5 minutes of waiting)
+	if cfg, err := Load(""); err != nil {
+		t.Fatalf("Load (default): %v", err)
+	} else if cfg.WaitingRoomRetries != 4 {
+		t.Errorf("WaitingRoomRetries = %d, want 4 (default)", cfg.WaitingRoomRetries)
+	}
+
+	// explicit 0 surfaces the waiting room at once
+	t.Setenv("WAITING_ROOM_RETRIES", "0")
+	if cfg, err := Load(""); err != nil {
+		t.Fatalf("Load (0): %v", err)
+	} else if cfg.WaitingRoomRetries != 0 {
+		t.Errorf("WaitingRoomRetries = %d, want 0 (disabled)", cfg.WaitingRoomRetries)
+	}
+	t.Setenv("WAITING_ROOM_RETRIES", "")
+
+	// JSON file value
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"WAITING_ROOM_RETRIES": 7}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err := Load(path); err != nil {
+		t.Fatalf("Load (JSON): %v", err)
+	} else if cfg.WaitingRoomRetries != 7 {
+		t.Errorf("WaitingRoomRetries = %d, want 7 (JSON)", cfg.WaitingRoomRetries)
+	}
+
+	// negative fails validation
+	t.Setenv("WAITING_ROOM_RETRIES", "-1")
+	if _, err := Load(""); err == nil || !strings.Contains(err.Error(), "WAITING_ROOM_RETRIES") {
+		t.Fatalf("Load (negative): err = %v, want error mentioning WAITING_ROOM_RETRIES", err)
+		return
+	}
+	t.Setenv("WAITING_ROOM_RETRIES", "")
+}
+
 func TestBadDuration(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("AUTH_TOKENS", "tok")

@@ -91,9 +91,16 @@ type Config struct {
 	// {0: "z-ai/glm-5.2"}. Slots without an entry are unpinned (serve any
 	// model). Parsed at Load; malformed values reject the config.
 	PinModel         map[int]string
-	TransientRetries int    // max additional attempts after a transient failure: transport on a fresh connection, transient upstream queues in place same-session (0 = disabled; default 1)
-	SessionPersist   bool   // true = persist session state to disk so restart resumes unexpired sessions (SESSION_PERSIST)
-	SessionStateFile string // path to the session state file (SESSION_STATE_FILE; default .freebuff-session-state.json)
+	TransientRetries int // max additional attempts after a transient failure: transport on a fresh connection, free_mode_capacity_deferred in place same-session (0 = disabled; default 1)
+	// WaitingRoomRetries is WAITING_ROOM_RETRIES: the separate budget for
+	// in-place waiting-room retries (any 503, or the 429 waiting_room_queued
+	// race). Kept apart from TransientRetries because the waiting room is an
+	// admission queue the CLI rides out for minutes, while a capacity
+	// deferral is a transient blip. 0 disables waiting-room retries
+	// (surface the 503 at once); default 4.
+	WaitingRoomRetries int
+	SessionPersist     bool   // true = persist session state to disk so restart resumes unexpired sessions (SESSION_PERSIST)
+	SessionStateFile   string // path to the session state file (SESSION_STATE_FILE; default .freebuff-session-state.json)
 	// SessionTimezone is the IANA zone the gateway declares on session reads
 	// (SESSION_TIMEZONE, the x-fb-timezone header): the upstream server picks
 	// the account's daily reset zone from it. Empty = auto — the host zone
@@ -198,10 +205,19 @@ type Config struct {
 	// (SMART_PROBE_BACKOFF_MAX; default 30m). Zero-tolerant like
 	// BURST_WINDOW: empty or non-positive values fall back to the default.
 	SmartProbeBackoffMax time.Duration
-	// WaitingRoomChain, when enabled (WAITING_ROOM_CHAIN=false default),
-	// fires the reference ad-chain + streak requests before the next
-	// session create after an upstream 428 waiting_room_required (issue
-	// #94(b), gated stub — best-effort, never blocks the request).
+	// WaitingRoomChain, when enabled (WAITING_ROOM_CHAIN=true default since
+	// 2026-09-25), fires the landing-screen ad auction + streak before the
+	// next session create after an upstream 428 waiting_room_required
+	// (issue #94(b) — best-effort, never blocks the request).
+	//
+	// Why ON: the wire surface the CLI uses for this is literally named
+	// "waiting_room" — it is the pre-session ("landing") screen, mounted with
+	// enabled:true/forceStart:true because "this is where monetization lives"
+	// (cli/src/hooks/use-gravity-ad.ts:97-99,
+	// cli/src/components/freebuff-landing-screen.tsx:477). The CLI therefore
+	// ALWAYS fetches one auction in the pre-session state; a client that
+	// reaches admission without ever fetching one is the divergence the
+	// fb986b48 ban post-mortem flagged. WAITING_ROOM_CHAIN=false opts out.
 	WaitingRoomChain bool
 	// RateLimitPerIP / RateLimitBurst cap client request rates per source IP
 	// (issue #137): RATE_LIMIT_PER_IP default 0 (disabled; e.g. 20 req/s);

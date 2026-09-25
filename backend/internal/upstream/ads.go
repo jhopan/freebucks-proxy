@@ -3,7 +3,6 @@ package upstream
 import (
 	"bytes"
 	"context"
-	cryptoRand "crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -70,35 +69,40 @@ func adBrowserUserAgent() string {
 // a hung upstream never blocks a session create for long.
 const waitingRoomChainTimeout = 15 * time.Second
 
-// FireWaitingRoomChain runs the reference pre-session flow (issue #94(b),
-// WAITING_ROOM_CHAIN gate): POST /api/v1/ads per configured ad provider,
-// then the ads impression + click legs for the auctioned ad, then GET
-// /api/v1/freebuff/streak — mirroring freebuff2api-optimized codebuff.py
-// _request_ads_and_streak (surface="waiting_room") plus the CLI ad loop
-// (use-gravity-ad.ts recordImpressionOnce/recordClick: the free-mode ad loop
-// gates free mode, freebuff-cost-mode.ts). Strictly
-// best-effort: every failure is logged and swallowed; the caller must never
-// depend on it (a gated stub whose real value is keeping the account's
-// waiting-room requirement satisfied before the next session create). The
-// streak call fires once after the provider loop, matching the reference.
+// FireWaitingRoomChain runs the pre-session ad flow (issue #94(b),
+// WAITING_ROOM_CHAIN gate): ONE POST /api/v1/ads to the primary provider,
+// then GET /api/v1/freebuff/streak — the two calls the live CLI emits per
+// waiting-room episode (wire capture 2026-09-25, commit 8c96a446).
 //
-// Honesty note: the impression acks a server-issued impUrl the auction just
-// returned (grounded), but the click leg has no user gesture behind it —
-// the proxy renders no ad card, so nothing was clicked. That leg fabricates
-// engagement signal the CLI only sends on a real click. It stays because the
-// free-mode ad loop is a live-mode gate, but reviewers should scrutinize it:
-// dropping the click leg is the safe retreat if the server ever treats
-// gestureless clicks as abuse.
+// The older shape — an auction per configured provider plus impression/click
+// legs — was retired. The CLI never sends those legs, and the click leg had
+// no user gesture behind it (the proxy renders no ad card, so nothing was
+// clicked), which fabricated engagement signal the CLI only emits on a real
+// click. Re-adding a leg needs a live capture proving the CLI sends it.
+//
+// Why "waiting_room" is the right surface for a PRE-session call: it is the
+// legacy wire name for the freebuff landing screen
+// (cli/src/hooks/use-gravity-ad.ts:97-99), the screen
+// freebuff-landing-screen.tsx:477 mounts with enabled:true, forceStart:true
+// ("this is where monetization lives"). The CLI fires that auction as the
+// landing screen mounts — i.e. before a session exists — and again each time
+// a 428 waiting_room_required sends it back there (endsTheSession:true;
+// common/src/types/freebuff-session.ts FREEBUFF_GATE_CODES). sessionID is
+// therefore normally "" and the payload omits the key; a caller passing a
+// value must pass a real session instance id, never a run id.
+//
+// Strictly best-effort: every failure is logged and swallowed; the caller
+// must never depend on it. Its value is keeping the account's pre-session ad
+// engagement present before the next session create — the fork's own ban
+// post-mortem (fb986b48) found that reaching admission WITHOUT that
+// engagement is the shape upstream flags.
 func (c *Client) FireWaitingRoomChain(ctx context.Context, sessionID string) {
 	ctx, cancel := context.WithTimeout(ctx, waitingRoomChainTimeout)
 	defer cancel()
-	// Fork 2026-09-25 (wire capture of the live CLI): the CLI fires exactly
-	// ONE POST /api/ads per waiting-room episode — to freebuff.com, with the
-	// session-scoped body — and sends NO impression/click legs (capture:
-	// docs/operations/bun-1.3.14-clienthello.txt companion log). The
-	// fabricated impression/click pair was a signal the CLI never sends.
-	// One auction per episode: the CLI fires gravity once and moves on (no
-	// second provider retry inside the same wait).
+	// One auction per episode, to the primary provider only: the live CLI
+	// fires gravity once and moves on — there is no second-provider retry
+	// inside the same wait (wire capture 2026-09-25, docs/operations/
+	// bun-1.3.14-clienthello.txt companion log).
 	if _, err := c.requestAds(ctx, waitingRoomAdProviders[0], sessionID); err != nil {
 		slog.Debug("waiting room chain: ads request failed", "provider", waitingRoomAdProviders[0], "err", err)
 	}
@@ -198,83 +202,6 @@ func (c *Client) requestAds(ctx context.Context, provider, sessionID string) (st
 		return "", nil
 	}
 	return auction.Ads[0].ImpURL, nil
-}
-
-// adEventIDHeader is the per-event id header the server reads (reference
-// common/src/ads/ad-event-hygiene.ts FREEBUFF_EVENT_ID_HEADER): one
-// crypto/rand uuid per logical event, echoed in the body as clientEventId.
-const adEventIDHeader = "X-Freebuff-Event-Id"
-
-// impressionPayload builds the /api/v1/ads/impression body for a
-// server-issued impUrl (reference use-gravity-ad.ts recordImpressionOnce
-// direct-fetch path: impUrl + agentMode + browser userAgent/os +
-// clientEventId). mode is omitted: the CLI's is its agentMode and the proxy
-// has no agent mode to declare honestly. renderDelayMs is omitted: no card
-// is mounted, so there is no receipt-to-mount delay to report.
-func impressionPayload(impURL string) map[string]any {
-	return map[string]any{
-		"impUrl":        impURL,
-		"userAgent":     adBrowserUserAgent(),
-		"os":            deviceOS(),
-		"clientEventId": newAdEventID(),
-	}
-}
-
-// clickPayload builds the /api/v1/ads/click body for a server-issued impUrl
-// (reference use-gravity-ad.ts recordClick: impUrl + clientEventId +
-// optional surface). surface rides along because the auction claimed
-// surface="waiting_room" for this impUrl; dock fields are omitted (no dock,
-// no dwell to report honestly).
-func clickPayload(impURL string) map[string]any {
-	return map[string]any{
-		"impUrl":        impURL,
-		"clientEventId": newAdEventID(),
-		"surface":       "waiting_room",
-	}
-}
-
-// postAdEvent POSTs one ads impression/click event: Content-Type + Bearer
-// via newRequest (both paths carry a JSON body), the Freebuff-CLI product UA
-// override, and the caller-minted X-Freebuff-Event-Id echoed in the body.
-// Best-effort transport like the rest of the chain: the caller logs and
-// swallows errors so ad failures never fail admission.
-func (c *Client) postAdEvent(ctx context.Context, path string, payload map[string]any) error {
-	body, _ := json.Marshal(payload)
-	req, err := c.newRequest(ctx, http.MethodPost, path, body)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("User-Agent", freebuffCliUA)
-	if eventID, ok := payload["clientEventId"].(string); ok && eventID != "" {
-		req.Header.Set(adEventIDHeader, eventID)
-	}
-	resp, cancel, classErr := c.do(req, c.sessionCallTimeout)
-	if classErr != nil && resp == nil {
-		return classErr
-	}
-	if cancel != nil {
-		defer cancel()
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if classErr != nil {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxAdResponseRead))
-		return fmt.Errorf("ads event %s status %d: %s", path, resp.StatusCode, truncate(string(raw), 200))
-	}
-	_, _ = io.ReadAll(io.LimitReader(resp.Body, maxAdResponseRead))
-	return nil
-}
-
-// newAdEventID mints one UUIDv4 event id per ads event, mirroring the CLI's
-// crypto.randomUUID per impression/click (use-gravity-ad.ts: one id per
-// logical event; the header is what the server reads).
-func newAdEventID() string {
-	var b [16]byte
-	if _, err := cryptoRand.Read(b[:]); err != nil {
-		return fmt.Sprintf("%x", time.Now().UnixNano())
-	}
-	b[6] = (b[6] & 0x0f) | 0x40 // version 4
-	b[8] = (b[8] & 0x3f) | 0x80 // variant 10
-	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
 // deviceOS maps runtime.GOOS to the ads device block's wire contract

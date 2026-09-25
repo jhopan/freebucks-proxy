@@ -174,15 +174,25 @@ func classifyError(status int, body string, hdr http.Header) error {
 		// (upstream/freebuff freebuff-session.ts FREEBUFF_GATE_CODES).
 		return &WaitingRoomError{RetryAfter: retryAfter, Detail: truncate(body, 200)}
 	case containsAny(lower, string(WireCodeWaitingRoomRequired)):
-		// 428 waiting_room_required (issue #94): the account must walk the
-		// reference pre-session ad-chain + streak flow before the next
-		// session create. Own retryable signal (Retry-After honored, no
-		// cooldown) — deliberately NOT ErrSessionInvalid: the session row is
-		// fine, so nothing must be invalidated (reference
-		// freebuff2api-optimized codebuff.py:1048-1074). The body marker is
-		// the discriminator (upstream can attach it to 428/429 alike); the
+		// 428 waiting_room_required. The wire contract is explicit about what
+		// this means: common/src/types/freebuff-session.ts FREEBUFF_GATE_CODES
+		// pairs it with endsTheSession:TRUE — "the caller's row is GONE", and
+		// "every one of them has the same recovery — forget the dead window
+		// and re-admit on the same instance id". So the session layer drops
+		// the dead row (session_admission.go:481 on the queued refresh,
+		// session_poll.go on the poll) and the next EnsureSession re-admits.
+		//
+		// The error itself is therefore a retryable signal, NOT a cooldown
+		// write: Retry-After is honored and nothing is parked (the session is
+		// already gone by the time this is returned). The body marker is the
+		// discriminator — upstream can attach it to 428/429 alike — and the
 		// Client.classify wrapper records the flag so the pool can fire the
-		// gated WAITING_ROOM_CHAIN before the next create.
+		// WAITING_ROOM_CHAIN landing-screen auction before the next create.
+		//
+		// (The old comment here claimed "the session row is fine, so nothing
+		// must be invalidated". That was wrong on both counts: upstream marks
+		// it session-ending, and the session layer has been invalidating on it
+		// since #116/#140.)
 		return &WaitingRoomRequiredError{RetryAfter: retryAfter, Detail: truncate(body, 200)}
 	case containsAny(lower, string(WireCodeSessionModelMismatch)) && containsAny(lower, "limited"):
 		// The egress IP cannot serve the requested model (e.g. "Limited free
@@ -726,7 +736,9 @@ func isCapacityDeferred(err error) bool {
 // isWaitingRoom reports whether err is an upstream waiting-room refusal: any
 // 503 (the model has no serving slot right now) or the 429
 // waiting_room_queued admission race. Both are transient queue conditions
-// the chat path waits out same-session under the TRANSIENT_RETRIES budget.
+// the chat path waits out same-session under the WAITING_ROOM_RETRIES budget
+// — its own knob, not TRANSIENT_RETRIES, because a queue the CLI rides out
+// for minutes must not share a counter with a capacity blip.
 func isWaitingRoom(err error) bool {
 	var wr *WaitingRoomError
 	return errors.As(err, &wr)

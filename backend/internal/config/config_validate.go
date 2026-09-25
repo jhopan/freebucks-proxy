@@ -34,6 +34,8 @@ func (c Config) Validate() error {
 		return errors.New("REQUEST_JITTER cannot be negative")
 	case c.TransientRetries < 0:
 		return errors.New("TRANSIENT_RETRIES cannot be negative")
+	case c.WaitingRoomRetries < 0:
+		return errors.New("WAITING_ROOM_RETRIES cannot be negative")
 	case c.RunFinishQueueSize < 0 || c.RunsDrainQueueCap < 0:
 		return errors.New("RUN_FINISH_QUEUE_SIZE/RUNS_DRAIN_QUEUE_CAP cannot be negative (0 = default)")
 	case c.SessionPersist && strings.TrimSpace(c.SessionStateFile) == "":

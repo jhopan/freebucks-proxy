@@ -480,12 +480,12 @@ func TestSessionCallsStampFirstTabDiscount(t *testing.T) {
 	}
 }
 
-// TestWaitingRoomChainFiresAdLegs pins the free-mode ad loop legs: the
-// auction's server-issued impUrl is acked on /api/v1/ads/impression and
-// /api/v1/ads/click with the Freebuff-CLI product UA, a uuid
-// X-Freebuff-Event-Id echoed in the body as clientEventId, and the
-// browser-like body UA + os. Best-effort is covered by
-// TestWaitingRoomChainAdFailureNeverFailsAdmission.
+// TestWaitingRoomChainFiresAdLegs pins the live-CLI wire shape of the chain:
+// exactly ONE POST /api/ads, to the primary provider, carrying the
+// Freebuff-CLI product UA + Bearer token, surface "waiting_room" and the
+// browser-like body userAgent — and NO impression/click legs, which the CLI
+// never sends (the regression that retired the fabricated pair). Best-effort
+// is covered by TestWaitingRoomChainAdFailureNeverFailsAdmission.
 func TestWaitingRoomChainFiresAdLegs(t *testing.T) {
 	srv := newRecordingUpstream()
 	defer srv.Close()

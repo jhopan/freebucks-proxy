@@ -89,9 +89,9 @@ func (c *Client) ChatCompletions(ctx context.Context, opts ChatOptions, body []b
 	}
 
 	// Transient upstream queues are retried IN PLACE against the same lease
-	// and session (opts are unchanged, so the instance id is reused),
-	// bounded by the TRANSIENT_RETRIES budget — never a token cooldown,
-	// never a session invalidation:
+	// and session (opts are unchanged, so the instance id is reused), each
+	// bounded by its OWN per-class budget — never a token cooldown, never a
+	// session invalidation:
 	//   - free_mode_capacity_deferred (429): upstream says "your request
 	//     will be retried automatically" and a same-session retry recovers
 	//     immediately (empirically common on deepseek-v4-flash;
@@ -102,10 +102,16 @@ func (c *Client) ChatCompletions(ctx context.Context, opts ChatOptions, body []b
 	//     (upstream/freebuff cli/src/utils/freebuff-session-api.ts:48-72),
 	//     so the proxy waits out the same window in-request before
 	//     surfacing 503 + Retry-After.
-	// transientQueueAttempts is the per-request budget: a fresh call starts
-	// at zero, so every request gets its own TRANSIENT_RETRIES allowance
-	// (the client-lifetime atomics only track the metrics).
+	// Two INDEPENDENT per-request budgets. A fresh call starts both at zero,
+	// so every request gets its own allowance (the client-lifetime atomics
+	// only track the metrics). They are separate because the two conditions
+	// have different vendor shapes: a capacity deferral is a transient blip
+	// the AI SDK absorbs in ~2 attempts, while the waiting room is an
+	// admission queue the CLI rides out for minutes. Sharing one counter let
+	// a single deferral consume the waiting-room allowance (and vice versa),
+	// which is how a queued request gave up after one attempt.
 	transientQueueAttempts := 0
+	waitingRoomAttempts := 0
 	for {
 		req, err := c.newRequest(ctx, http.MethodPost, "/api/v1/chat/completions", enveloped)
 		if err != nil {
@@ -165,21 +171,37 @@ func (c *Client) ChatCompletions(ctx context.Context, opts ChatOptions, body []b
 			c.dump("chat", req, resp.StatusCode, bodyText)
 			deferred := isCapacityDeferred(cerr)
 			waitingRoom := isWaitingRoom(cerr)
-			if (deferred || waitingRoom) && transientQueueAttempts < c.transientRetriesLimit {
+			// Charge the retry to its own class's budget: a waiting room
+			// never spends the deferral's allowance, and vice versa.
+			retryable := false
+			if waitingRoom {
+				if waitingRoomAttempts < c.waitingRoomRetriesLimit {
+					waitingRoomAttempts++
+					retryable = true
+				}
+			} else if deferred && transientQueueAttempts < c.transientRetriesLimit {
 				transientQueueAttempts++
+				retryable = true
+			}
+			if retryable {
 				msg := "upstream capacity deferred, retrying same session"
 				if waitingRoom {
 					msg = "upstream waiting room, retrying same session"
 					c.waitingRoomRetries.Add(1) // lifetime metric
-					// Fork 2026-09-25: the CLI spends its wait running the
-					// waiting_room ad surface (gravity/zeroclick fetch +
-					// impression/click + streak) — use-gravity-ad.ts with
-					// surface="waiting_room". A client that queues without
-					// ever producing that engagement is the shape upstream
-					// flagged and banned on 2026-09-24/25. Fire the same
-					// best-effort chain once per queued chat so the wait
-					// looks like the CLI's wait.
-					go c.FireWaitingRoomChain(context.Background(), opts.RunID)
+					// No ad-chain call here, deliberately. The wire surface
+					// named "waiting_room" is the PRE-session landing screen
+					// (cli/src/hooks/use-gravity-ad.ts:97-99, "the legacy wire
+					// name for the freebuff landing screen"), and the CLI fires
+					// that auction as the landing screen mounts — before a
+					// session exists — plus again after each 428 sends it back
+					// there. While a CHAT is queued the CLI only runs its
+					// session poll loop (cli/src/utils/polling-backoff.ts
+					// failedPollDelayMs), which fetches no ads. The auction
+					// therefore belongs on the pre-session admission path
+					// (pool/acquire_route.go, pool/bridge.go — gated by
+					// WAITING_ROOM_CHAIN), not here. An earlier version fired it
+					// from this branch and passed opts.RunID as the auction's
+					// sessionId — a run id, not a session instance id.
 				} else {
 					c.capacityDeferredRetries.Add(1) // lifetime metric
 				}
@@ -190,9 +212,20 @@ func (c *Client) ChatCompletions(ctx context.Context, opts ChatOptions, body []b
 				// the parsed retry-after (floor 10s) so the same-session retry
 				// does not re-POST immediately (amplification); ctx
 				// cancellation aborts the sleep like every other upstream wait.
+				// The waiting room does NOT use that flat floor: it uses the
+				// vendor's POLL backoff (20s doubling to a 5m cap, jittered
+				// over the lower half, never before the server's Retry-After)
+				// — the shape the CLI's own session loop keeps running while
+				// it is queued (cli/src/utils/polling-backoff.ts
+				// failedPollDelayMs). Re-POSTing the same queue every 10s is
+				// amplification and a shape the CLI never produces.
+				parsed := queueRetryAfter(cerr)
 				ra := 10 * time.Second
-				if d := queueRetryAfter(cerr); d > 0 {
-					ra = d
+				if parsed > 0 {
+					ra = parsed
+				}
+				if waitingRoom {
+					ra = c.waitingRoomDelay(waitingRoomAttempts, parsed)
 				}
 				// Same-session retry after the parsed wait: Debug like the
 				// transport retry in do(), carrying the same join keys.
@@ -215,6 +248,74 @@ func (c *Client) ChatCompletions(ctx context.Context, opts ChatOptions, body []b
 		// context; abandoning it leaks the timer goroutine until it fires.
 		return &cancelBody{ReadCloser: resp.Body, cancel: cancel}, nil
 	}
+}
+
+// waitingRoomBackoffBase / waitingRoomBackoffMax mirror the vendor's failed
+// poll pacing (cli/src/utils/polling-backoff.ts failedPollDelayMs): 20s
+// doubling per consecutive failure, capped at 5m. The session poll loop and
+// the pool lifecycle carry the same twin; this is the chat-path one.
+const (
+	waitingRoomBackoffBase = 20 * time.Second
+	waitingRoomBackoffMax  = 5 * time.Minute
+)
+
+// waitingRoomDelay returns the wait before re-POSTing a queued chat, honoring
+// the waitingRoomBackoffFn test seam when a test has set one.
+func (c *Client) waitingRoomDelay(attempt int, retryAfter time.Duration) time.Duration {
+	if c.waitingRoomBackoffFn != nil {
+		return c.waitingRoomBackoffFn(attempt, retryAfter)
+	}
+	return waitingRoomBackoff(attempt, retryAfter)
+}
+
+// waitingRoomBackoff returns the wait before re-POSTing a waiting-room-queued
+// chat, given the 1-based attempt number just spent and the server's
+// Retry-After (0 when the response carried none).
+//
+// Vendor semantics, matching failedPollDelayMs:
+//   - exponential window 20s * 2^(attempt-1), capped at 5m;
+//   - EQUAL jitter over the lower half of the window — the window's floor is
+//     kept while a large queued fleet still spreads across time;
+//   - Retry-After is a FLOOR, jittered UP only ([1.0, 1.2]x) and itself
+//     capped, so the retry can never land before the wait the server named.
+//
+// The flat 10s floor the deferral path uses is deliberately NOT applied here:
+// a queued model can stay queued for minutes, and re-POSTing it 6x a minute
+// is both amplification and a queue-hammering shape the CLI never produces.
+func waitingRoomBackoff(attempt int, retryAfter time.Duration) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	d := waitingRoomBackoffBase << min(attempt-1, 5)
+	if d > waitingRoomBackoffMax {
+		d = waitingRoomBackoffMax
+	}
+	d = d/2 + time.Duration(queueRand()%uint64(d/2+1))
+	if retryAfter > 0 {
+		// Floor the operand: a 1ns Retry-After would panic on a %0 draw.
+		if retryAfter < 5*time.Nanosecond {
+			retryAfter = 5 * time.Nanosecond
+		}
+		ra := retryAfter + time.Duration(queueRand()%uint64(retryAfter/5+1))
+		if ra > d {
+			d = ra
+		}
+		if d > waitingRoomBackoffMax {
+			d = waitingRoomBackoffMax
+		}
+	}
+	return d
+}
+
+// queueRand draws one uint64 from crypto/rand (the queue backoff's jitter
+// source). A read failure falls back to a time-derived value so a jitter
+// source is always available; the result only ever widens or narrows a wait.
+func queueRand() uint64 {
+	var b [8]byte
+	if _, err := cryptoRand.Read(b[:]); err != nil {
+		return uint64(time.Now().UnixNano())
+	}
+	return binary.BigEndian.Uint64(b[:])
 }
 
 const (

@@ -12,6 +12,7 @@ import (
 	"context"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"testing"
@@ -189,4 +190,84 @@ func TestSessionResponseFeedsRiskEngine(t *testing.T) {
 	// bounds rather than a specific value (the retained-window semantics are
 	// tested in the stealth package).
 
+}
+
+// TestEgressRelayWiringAndStealthOverride pins the UPSTREAM_EGRESS_URL
+// (TLS-sidecar relay) wiring and its conflict with TLS_FINGERPRINT.
+//
+// The relay installs BOTH DialContext and DialTLSContext, but the stealth
+// branch just below re-assigns DialTLSContext, and http.Transport prefers
+// DialTLSContext over DialContext for https — and every upstream call is
+// https. So a stealth profile silently replaces the tunnel: the relay never
+// sees a connection while the deployment still looks configured. The client
+// warns rather than resolving it silently, because both settings are
+// deliberate operator choices and the intended winner is not derivable from
+// config alone.
+//
+// Both subtests assert the dialer BEHAVIORALLY (which wrapper the refused
+// dial carries) instead of comparing closures, which are not comparable.
+func TestEgressRelayWiringAndStealthOverride(t *testing.T) {
+	dialErr := func(t *testing.T, c *Client) string {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodGet, "https://127.0.0.1:1/", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = c.http.Transport.RoundTrip(req)
+		if err == nil {
+			t.Fatal("RoundTrip to a refused port succeeded")
+			return ""
+		}
+		return err.Error()
+	}
+	captureWarn := func(t *testing.T) *bytes.Buffer {
+		t.Helper()
+		orig := slog.Default()
+		sink := &bytes.Buffer{}
+		slog.SetDefault(slog.New(slog.NewTextHandler(sink, &slog.HandlerOptions{Level: slog.LevelWarn})))
+		t.Cleanup(func() { slog.SetDefault(orig) })
+		return sink
+	}
+
+	t.Run("relay installed when no stealth profile", func(t *testing.T) {
+		sink := captureWarn(t)
+		t.Setenv("UPSTREAM_EGRESS_URL", "http://127.0.0.1:3128")
+		c, err := New("tok", testConfig("", nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The tunnel must dial the RELAY (3128, refused) — not the target.
+		if msg := dialErr(t, c); !strings.Contains(msg, "egress relay dial") {
+			t.Errorf("dial error = %q, want the egress relay wrapper", msg)
+		}
+		if got := sink.String(); strings.Contains(got, "replaces the egress tunnel") {
+			t.Errorf("no stealth profile configured, the conflict warn must not fire: %s", got)
+		}
+	})
+
+	t.Run("stealth profile overrides the relay and warns", func(t *testing.T) {
+		sink := captureWarn(t)
+		t.Setenv("UPSTREAM_EGRESS_URL", "http://127.0.0.1:3128")
+		c, err := New("tok", testConfig("", func(cfg *config.Config) {
+			cfg.TLSFingerprint = "chrome126"
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The utls dialer won: the relay wrapper is gone from the error.
+		msg := dialErr(t, c)
+		if strings.Contains(msg, "egress relay dial") {
+			t.Errorf("dial error = %q, want the relay to be replaced by the stealth dialer", msg)
+		}
+		if !strings.Contains(msg, "tcp dial failed") {
+			t.Errorf("dial error = %q, want the stealth wrapper", msg)
+		}
+		logs := sink.String()
+		if !strings.Contains(logs, "replaces the egress tunnel") {
+			t.Fatalf("egress/stealth conflict WARN missing: %s", logs)
+		}
+		if !strings.Contains(logs, "tls_fingerprint=chrome126") {
+			t.Errorf("WARN missing tls_fingerprint attr: %s", logs)
+		}
+	})
 }

@@ -49,8 +49,24 @@ func TestAdoptCLISessionParsed(t *testing.T) {
 	if !cfg.AdoptCLISession {
 		t.Error("AdoptCLISession = false, want true")
 	}
+	if cfg.WaitingRoomChain != true {
+		t.Error("WaitingRoomChain = false, want true default (fb986b48 ban post-mortem: queuing without the waiting_room ad engagement is the shape upstream flags)")
+	}
+}
+
+// TestWaitingRoomChainDisable pins the escape hatch: the knob ships ON, so an
+// explicit false must still turn the chain off.
+func TestWaitingRoomChainDisable(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("AUTH_TOKENS", "tok-1")
+	t.Setenv("WAITING_ROOM_CHAIN", "false")
+
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if cfg.WaitingRoomChain {
-		t.Error("WaitingRoomChain = true, want false default")
+		t.Error("WaitingRoomChain = true, want false when WAITING_ROOM_CHAIN=false")
 	}
 }
 

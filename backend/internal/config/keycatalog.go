@@ -287,8 +287,8 @@ var keyCatalog = []KeyDef{
 	},
 	{
 		Key: "WAITING_ROOM_CHAIN", Group: GroupPool, Kind: "bool", Hidden: true,
-		Default:     "false",
-		Description: `After an upstream 428 waiting_room_required, fire the reference ad-chain + streak requests before the next session create (best-effort, never blocks).`,
+		Default:     "true",
+		Description: `After an upstream 428 waiting_room_required, fire the landing-screen ad auction + streak before the next session create (best-effort, never blocks). On by default: the CLI always fetches one auction in the pre-session state (the wire surface named "waiting_room" IS the landing screen), and the fb986b48 ban post-mortem flagged clients that reach admission without ever fetching one. WAITING_ROOM_CHAIN=false opts out.`,
 	},
 
 	// ── upstream ─────────────────────────────────────────────────────────
@@ -361,12 +361,17 @@ var keyCatalog = []KeyDef{
 	{
 		Key: "TRANSIENT_RETRIES", Group: GroupUpstream, Kind: "int", RestartOnly: true, Hidden: true,
 		Default:     "1",
-		Description: `Max additional attempts after a transient failure: transport failures retry on a fresh connection, transient upstream queues (free_mode_capacity_deferred, the waiting room) retry in place against the same session; other upstream errors never retry (0 disables).`,
+		Description: `Max additional attempts after a transient failure: transport failures retry on a fresh connection, the free_mode_capacity_deferred queue retries in place against the same session; other upstream errors never retry (0 disables). The waiting room has its own WAITING_ROOM_RETRIES budget.`,
 	},
 	{
 		Key: "UPSTREAM_BASE_URL", Group: GroupUpstream, Kind: "text", RestartOnly: true, Hidden: true,
 		Default:     "https://www.codebuff.com",
 		Description: `Upstream API endpoint (codebuff.com is normalized to www.codebuff.com).`,
+	},
+	{
+		Key: "WAITING_ROOM_RETRIES", Group: GroupUpstream, Kind: "int", RestartOnly: true, Hidden: true,
+		Default:     "4",
+		Description: `Max in-place retries when the upstream waiting room queues a chat (any 503, or the 429 waiting_room_queued race). Separate from TRANSIENT_RETRIES because the CLI rides out a queue for minutes: retries use the vendor poll backoff (20s doubling, 5m cap, jittered, Retry-After honored), so 4 attempts cover roughly 2-5 minutes before the 503 is surfaced (0 = surface at once).`,
 	},
 
 	// ── security ─────────────────────────────────────────────────────────

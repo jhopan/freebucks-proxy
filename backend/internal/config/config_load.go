@@ -103,6 +103,7 @@ func LoadOpts(configPath string, opts LoadOptions) (Config, error) {
 	overrideString(&raw.RequestJitter, "REQUEST_JITTER")
 	overrideString(&raw.CLIVersion, "CLI_VERSION")
 	overrideInt(&raw.TransientRetries, "TRANSIENT_RETRIES")
+	overrideInt(&raw.WaitingRoomRetries, "WAITING_ROOM_RETRIES")
 	overrideBool(&raw.SessionPersist, "SESSION_PERSIST")
 	overrideString(&raw.SessionStateFile, "SESSION_STATE_FILE")
 	overrideBool(&raw.HTTP2Upstream, "HTTP2_UPSTREAM")
@@ -290,6 +291,17 @@ func LoadOpts(configPath string, opts LoadOptions) (Config, error) {
 		transientRetries = *raw.TransientRetries
 	}
 
+	// WAITING_ROOM_RETRIES: nil defaults to 4. The waiting room is an
+	// admission queue, not a transient blip: the CLI keeps its session retry
+	// loop running at 20s doubling to a 5m cap, so one attempt (the
+	// TRANSIENT_RETRIES default) surfaced a 503 the CLI would have waited
+	// out. Four attempts on that backoff ride out roughly 2-5 minutes; an
+	// explicit 0 surfaces the 503 immediately.
+	waitingRoomRetries := 4
+	if raw.WaitingRoomRetries != nil {
+		waitingRoomRetries = *raw.WaitingRoomRetries
+	}
+
 	// RATE_LIMIT_PER_IP / RATE_LIMIT_BURST (issue #137): per-source-IP rate
 	// limiter to protect upstream from bursts and spam. 0 = disabled.
 	rateLimitPerIP := 0.0
@@ -406,6 +418,7 @@ func LoadOpts(configPath string, opts LoadOptions) (Config, error) {
 		RequestJitter:            requestJitter,
 		CLIVersion:               strings.TrimSpace(raw.CLIVersion),
 		TransientRetries:         transientRetries,
+		WaitingRoomRetries:       waitingRoomRetries,
 		SessionPersist:           raw.SessionPersist,
 		SessionStateFile:         strings.TrimSpace(raw.SessionStateFile),
 		RunFinishQueueSize:       runFinishQueueSize,
@@ -590,6 +603,7 @@ func applyMappedValues(raw *rawConfig, get func(string) string) {
 	overrideStringFrom(&raw.RequestJitter, get, "REQUEST_JITTER")
 	overrideStringFrom(&raw.CLIVersion, get, "CLI_VERSION")
 	overrideIntFrom(&raw.TransientRetries, get, "TRANSIENT_RETRIES")
+	overrideIntFrom(&raw.WaitingRoomRetries, get, "WAITING_ROOM_RETRIES")
 	overrideBoolFrom(&raw.SessionPersist, get, "SESSION_PERSIST")
 	overrideStringFrom(&raw.SessionStateFile, get, "SESSION_STATE_FILE")
 	overrideBoolFrom(&raw.HTTP2Upstream, get, "HTTP2_UPSTREAM")

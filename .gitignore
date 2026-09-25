@@ -178,6 +178,8 @@ authorized_keys
 message-history.json
 freebuff-chat-*.md
 .history/
+# WorkBuddy agent workspace (memory + local session state)
+.workbuddy-ai/
 
 # ── local docker compose overrides ──
 docker-compose.override.yml

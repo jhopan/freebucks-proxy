@@ -299,7 +299,7 @@ live-apply (no restart needed).
 | spill | after the wait expires (or the FIFO is full) move to the next eligible lane |
 | session | the single upstream session of a (account, model) lane, reused by all of its turns |
 | pin | eligibility filter declaring which model an account may serve, checked before any session contact |
-| waiting room | upstream 428 state; `WAITING_ROOM_CHAIN` controls the follow-up requests |
+| waiting room | upstream 428 state; `WAITING_ROOM_CHAIN` controls the follow-up requests. Untuk 503/429 `waiting_room_queued` saat chat, `WAITING_ROOM_RETRIES` mengatur berapa kali proxy menunggu di sesi yang sama (backoff vendor: 20 s berlipat, batas 5 m, jitter, `Retry-After` dihormati) |
 
 | Question | Answer |
 |---|---|
@@ -313,6 +313,7 @@ live-apply (no restart needed).
 | Can the proxy pin client A to account 0? | No. Client keys are hashed for usage statistics only; use bridge mode (client supplies its own token) or separate instances with disjoint accounts |
 | Does a rejected request burn quota? | No. The permit is taken before any upstream admission, so a 429 costs nothing upstream |
 | Safest setting for a new account? | `SLOTS_PER_ACCOUNT=1`, `QUEUE_DEPTH=0` (fail fast, no pile-up), keep `SAFE_MODE=true` |
+| Kenapa request diam lama lalu 503? | Itu waiting room: proxy menunggu di sesi yang sama sampai `WAITING_ROOM_RETRIES` habis (default 4 ≈ 2–5 menit), baru menyerahkan 503 + `Retry-After` ke klien. Turunkan ke 0 kalau klien punya timeout sendiri yang lebih pendek |
 
 ## 10. Post-#666 measurements (fork 1.13.0.18, 2026-09-20)
 

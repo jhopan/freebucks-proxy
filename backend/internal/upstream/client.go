@@ -8,14 +8,18 @@
 package upstream
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -44,11 +48,19 @@ type Client struct {
 	// transientRetriesLimit is TRANSIENT_RETRIES: the maximum number of
 	// additional attempts after a transient failure (0 disables retries
 	// entirely). Transport-level failures (dial/TLS/reset/EOF) retry on a
-	// fresh connection; transient upstream queues
-	// (free_mode_capacity_deferred, the waiting room) retry in place
-	// against the SAME lease/session in ChatCompletions. Any other
-	// classified upstream error never retries.
+	// fresh connection; the free_mode_capacity_deferred queue retries in
+	// place against the SAME lease/session in ChatCompletions. No other
+	// classified upstream error retries under THIS knob — the waiting room
+	// has its own (waitingRoomRetriesLimit).
 	transientRetriesLimit int
+
+	// waitingRoomRetriesLimit is WAITING_ROOM_RETRIES: the separate,
+	// per-request budget for in-place waiting-room retries. It is its own
+	// knob (not TRANSIENT_RETRIES) because the waiting room is an admission
+	// queue the CLI rides out for minutes, while a capacity deferral is a
+	// transient blip the AI SDK absorbs in ~2 attempts. The two budgets are
+	// independent so neither can starve the other.
+	waitingRoomRetriesLimit int
 
 	// capacityDeferredRetries counts free_mode_capacity_deferred retries
 	// served by this client: the free-tier capacity queue is retried
@@ -60,7 +72,7 @@ type Client struct {
 	// waitingRoomRetries counts waiting-room retries served by this client:
 	// the upstream waiting room (any 503, or the 429 waiting_room_queued
 	// race) is retried in-place against the SAME lease/session under the
-	// same per-request TRANSIENT_RETRIES budget as the capacity queue.
+	// per-request WAITING_ROOM_RETRIES budget, on the vendor poll backoff.
 	waitingRoomRetries atomic.Int64
 
 	// stealthProfile is the active TLS fingerprint. profileMu guards swaps
@@ -113,6 +125,11 @@ type Client struct {
 	// retryBackoff overrides the computed exponential pre-retry sleep (test
 	// seam; nil uses the crypto/rand 1s*2^attempt +0-30% jitter, cap 10s).
 	retryBackoff func() time.Duration
+
+	// waitingRoomBackoffFn overrides the computed vendor poll backoff for
+	// waiting-room retries (test seam; nil uses waitingRoomBackoff's 20s
+	// doubling / 5m cap / equal jitter / Retry-After floor).
+	waitingRoomBackoffFn func(attempt int, retryAfter time.Duration) time.Duration
 }
 
 // TokenKey returns a stable, non-secret key derived from the client token
@@ -170,18 +187,19 @@ func NewWithIndex(token string, tokenIndex int, cfg *config.Config) (*Client, er
 	}
 
 	c := &Client{
-		token:                 token,
-		tokenIndex:            tokenIndex,
-		baseURL:               cfg.UpstreamBaseURL,
-		requestTimeout:        cfg.RequestTimeout,
-		sessionCallTimeout:    cfg.SessionCallTimeout,
-		requestJitter:         cfg.RequestJitter,
-		costMode:              cfg.CostMode,
-		userID:                cfg.ActingUserID,
-		debugDump:             cfg.DebugDump,
-		transientRetriesLimit: cfg.TransientRetries,
-		http2Upstream:         cfg.HTTP2Upstream,
-		rateLimitEvents:       make(map[string]*atomic.Int64),
+		token:                   token,
+		tokenIndex:              tokenIndex,
+		baseURL:                 cfg.UpstreamBaseURL,
+		requestTimeout:          cfg.RequestTimeout,
+		sessionCallTimeout:      cfg.SessionCallTimeout,
+		requestJitter:           cfg.RequestJitter,
+		costMode:                cfg.CostMode,
+		userID:                  cfg.ActingUserID,
+		debugDump:               cfg.DebugDump,
+		transientRetriesLimit:   cfg.TransientRetries,
+		waitingRoomRetriesLimit: cfg.WaitingRoomRetries,
+		http2Upstream:           cfg.HTTP2Upstream,
+		rateLimitEvents:         make(map[string]*atomic.Int64),
 	}
 
 	transport := http.DefaultTransport.(*http.Transport).Clone()
@@ -221,6 +239,67 @@ func NewWithIndex(token string, tokenIndex int, cfg *config.Config) (*Client, er
 	// HTTP_PROXY/HTTPS_PROXY env var never routes upstream traffic through a
 	// proxy either (full egress control).
 	transport.Proxy = nil
+	// Fork 2026-09-25: optional TLS-sidecar egress. When UPSTREAM_EGRESS_URL
+	// is set, all upstream traffic is tunneled through a local HTTP-CONNECT
+	// relay that owns the TLS handshake (sidecar_tls.py — OpenSSL ClientHello,
+	// the only transport the upstream admission lane currently accepts from
+	// this deployment: Go stdlib TLS and every utls profile tested 403
+	// banned on POST /admission while the same OpenSSL wire returns 200).
+	// The relay terminates TLS, so the transport dials the relay and speaks
+	// plain HTTP inside the tunnel; DialTLSContext returns the tunneled
+	// conn as-is.
+	egressActive := false
+	if egress := strings.TrimSpace(os.Getenv("UPSTREAM_EGRESS_URL")); egress != "" {
+		egURL, err := url.Parse(egress)
+		if err == nil && (egURL.Scheme == "http" || egURL.Scheme == "https") {
+			relayHost := egURL.Hostname()
+			relayPort := egURL.Port()
+			if relayPort == "" {
+				relayPort = "80"
+			}
+			egressDial := func(ctx context.Context, network, addr string) (net.Conn, error) {
+				conn, err := (&net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}).DialContext(ctx, "tcp", net.JoinHostPort(relayHost, relayPort))
+				if err != nil {
+					return nil, fmt.Errorf("upstream: egress relay dial: %w", err)
+				}
+				reqHost, _, err := net.SplitHostPort(addr)
+				if err != nil {
+					_ = conn.Close()
+					return nil, fmt.Errorf("upstream: egress target %q: %w", addr, err)
+				}
+				connect := "CONNECT " + reqHost + ":443 HTTP/1.1\r\nHost: " + reqHost + ":443\r\n\r\n"
+				if _, err := conn.Write([]byte(connect)); err != nil {
+					_ = conn.Close()
+					return nil, fmt.Errorf("upstream: egress CONNECT write: %w", err)
+				}
+				br := bufio.NewReader(conn)
+				line, err := br.ReadString('\n')
+				if err != nil {
+					_ = conn.Close()
+					return nil, fmt.Errorf("upstream: egress CONNECT read: %w", err)
+				}
+				if !strings.Contains(line, " 200") {
+					_ = conn.Close()
+					return nil, fmt.Errorf("upstream: egress CONNECT refused: %s", strings.TrimSpace(line))
+				}
+				// Drain the blank line terminating the CONNECT response.
+				for {
+					l, err := br.ReadString('\n')
+					if err != nil || l == "\r\n" || l == "\n" {
+						break
+					}
+				}
+				return &prefixConn{Conn: conn, r: br}, nil
+			}
+			transport.DialContext = egressDial
+			// The tunnel already terminates TLS upstream-side; speak h1
+			// plain inside it.
+			transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+				return egressDial(ctx, network, addr)
+			}
+			egressActive = true
+		}
+	}
 	if stealthProf != nil {
 		// Resolve the profile per request (instead of capturing it) so a
 		// transient retry can swap the pinned fingerprint without rebuilding
@@ -238,6 +317,17 @@ func NewWithIndex(token string, tokenIndex int, cfg *config.Config) (*Client, er
 		}
 		transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 			return stealth.Dialer(c.dialProfileFor(ctx), baseDial, false, alpn)(ctx, network, addr)
+		}
+		if egressActive {
+			// http.Transport prefers DialTLSContext over DialContext for
+			// https, and every upstream call is https — so this assignment
+			// silently REPLACES the egress tunnel installed just above. The
+			// relay then never sees a connection while the deployment still
+			// looks configured. Say so loudly instead of failing silently.
+			slog.Warn("UPSTREAM_EGRESS_URL is configured but TLS_FINGERPRINT replaces the egress tunnel; "+
+				"upstream traffic dials direct with the stealth profile and the relay is unused. "+
+				"Clear TLS_FINGERPRINT to route through the relay.",
+				"tls_fingerprint", cfg.TLSFingerprint)
 		}
 	}
 
@@ -413,7 +503,7 @@ func (c *Client) TransientRetries() int64 { return c.transientRetries.Load() }
 func (c *Client) CapacityDeferredRetries() int64 { return c.capacityDeferredRetries.Load() }
 
 // WaitingRoomRetries returns how many waiting-room retries this client
-// served (same-session retries under the TRANSIENT_RETRIES budget).
+// served (same-session retries under the WAITING_ROOM_RETRIES budget).
 func (c *Client) WaitingRoomRetries() int64 { return c.waitingRoomRetries.Load() }
 
 // PendingWaitingRoomChain reports whether the client last classified a 428
@@ -459,3 +549,12 @@ func (c *Client) sessionTimezone() string {
 	}
 	return localIANATimezone()
 }
+
+// prefixConn is a tunnel conn whose CONNECT response already consumed some
+// buffered bytes; replay them before live reads.
+type prefixConn struct {
+	net.Conn
+	r *bufio.Reader
+}
+
+func (p *prefixConn) Read(b []byte) (int, error) { return p.r.Read(b) }

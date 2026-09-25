@@ -451,3 +451,171 @@ interface-nya bisa diaudit:
 - Lokal: `TLS_FINGERPRINT=auto` + `ACTING_USER_ID=<id sendiri>` (118354d8)
 - VPS: `TLS_FINGERPRINT=auto`; fix baris `.env` rusak (`MODEL_LOCKS` nyambung
   TLS_FINGERPRINT — dihapus, akun suspended diparkir)
+
+---
+
+## 2026-09-25 — waiting room: budget terpisah + backoff vendor + chain ON
+
+### Akar masalah
+
+`TRANSIENT_RETRIES` default 1 dipakai bersama oleh dua kelas antrean yang
+berbeda: `free_mode_capacity_deferred` (blip sesaat, AI SDK menyerapnya dalam
+~2 percobaan) dan waiting room (antrean admission yang CLI tunggui sampai
+menit). Efeknya satu deferral menghabiskan jatah waiting room, jadi chat yang
+diantre menyerah setelah satu percobaan — dan tidurnya datar `max(10s,
+Retry-After)`, artinya queue yang sama di-POST ulang tiap 10 detik. CLI tidak
+pernah menghasilkan bentuk itu: loop sesinya memakai
+`cli/src/utils/polling-backoff.ts` `failedPollDelayMs` — 20 s berlipat, batas
+5 m, equal jitter di paruh bawah, dan `Retry-After` sebagai floor yang
+di-jitter naik saja.
+
+Selain itu `WAITING_ROOM_CHAIN` masih `false` padahal post-mortem ban
+`fb986b48` menyimpulkan justru antre TANPA engagement iklan `waiting_room`
+yang di-flag upstream.
+
+### Perubahan
+
+- **`WAITING_ROOM_RETRIES` (baru, default 4)** — budget terpisah untuk retry
+  waiting room di sesi yang sama (503 apa pun, atau 429
+  `waiting_room_queued`). 0 = serahkan 503 langsung. Knob chain lengkap:
+  dotenv → static → live → SSE hash → store refresh, plus
+  `restartOnlyConfigKeys` + `effectiveConfigKV` di server.
+- **`upstream/chat.go`** — budget dipecah per kelas (`waitingRoomAttempts`
+  vs `transientQueueAttempts`), dan waiting room memakai
+  `waitingRoomBackoff` (twin chat-path dari `pollBackoff` sesi + pool) alih-alih
+  floor datar 10 s. Seam test `waitingRoomBackoffFn` mengikuti pola
+  `retryBackoff`.
+- **`WAITING_ROOM_CHAIN` default `false` → `true`** — chain iklan sekarang
+  menyala secara default; `WAITING_ROOM_CHAIN=false` tetap jadi escape hatch.
+  Dasar bukti (primer, dari source upstream): `use-gravity-ad.ts:97-99`
+  menyebut `'waiting_room'` adalah **"legacy wire name for the freebuff
+  landing screen"**, dan `freebuff-landing-screen.tsx:477` me-mount surface
+  itu dengan `enabled: true, forceStart: true` ("this is where monetization
+  lives"). Jadi CLI SELALU mengambil satu auction di state pra-sesi, sementara
+  proxy tidak pernah. Ini menutup divergensi itu.
+- **Jalur chat TIDAK lagi menembak chain iklan** — `chat.go` dulu memanggil
+  `FireWaitingRoomChain` untuk setiap chat yang ter-queue (commit `fb986b48`),
+  padahal surface `waiting_room` adalah landing screen **pra-sesi**, dan saat
+  chat mengantre yang jalan di CLI adalah loop poll sesi
+  (`polling-backoff.ts` `failedPollDelayMs`) yang tidak mengambil iklan sama
+  sekali. Panggilan itu dihapus; auction tetap ditembak di jalur pra-sesi
+  (`pool/acquire_route.go:698`, `pool/bridge.go:261`, gate
+  `ConsumeWaitingRoomChain()` + `WAITING_ROOM_CHAIN`). Bonus: panggilan lama
+  mengirim `opts.RunID` sebagai `sessionId` di body auction — itu run id, bukan
+  session instance id (jalur pool mengirim `""`).
+- **Dead code dibersihkan** — `impressionPayload`, `clickPayload`, `postAdEvent`,
+  `newAdEventID`, `adEventIDHeader` tidak lagi dipanggil sejak commit `8c96a446`
+  mencabut leg impression/click dari body `FireWaitingRoomChain`. Kelimanya
+  dihapus beserta import `crypto/rand`. Ini sekaligus memperbaiki job CI
+  `golangci` yang semestinya **merah di `main`**: `.golangci.yml` meng-enable
+  `unused`, dan staticcheck melaporkan 5× `U1000` pada `ads.go` di HEAD.
+- Fixture e2e `config-meta.json` (2 file) di-regenerate; `.env.example` /
+  `.env.full-example` / `docs/operations/pool-tuning.md` diperbarui.
+
+### Temuan kontrak wire (penting)
+
+`common/src/types/freebuff-session.ts:1220` `FREEBUFF_GATE_CODES` adalah
+kontrak eksplisit untuk gate sesi:
+
+```
+waiting_room_required: { status: 428, endsTheSession: true  }
+waiting_room_queued:   { status: 429, endsTheSession: false }
+model_unavailable:     { status: 410, endsTheSession: false }
+```
+
+Artinya **428 = baris sesi sudah HILANG**, dan recovery-nya satu untuk semua
+kode `endsTheSession:true`: *"forget the dead window and re-admit on the same
+instance id"*. Ini **sudah** dilakukan fork di `session_admission.go:481`
+(queued refresh) dan `session_poll.go` — tapi komentar lama di
+`upstream/classify.go` menyatakan sebaliknya ("session row is fine, so nothing
+must be invalidated"). Komentar itu sekarang diperbaiki; tidak ada perubahan
+perilaku.
+
+Catatan terpisah: `send-message.ts:610` menyebut `waiting_room_queued`
+sebagai **kode legacy** — *"sessions are admitted immediately now, so this is
+only reachable in a transient race"*.
+
+### Hasil uji
+
+- `go test ./backend/...` hijau (semua paket, termasuk `session` 122 s).
+- `go vet ./backend/...` bersih; `gofmt -l backend/` bersih.
+- `npm --prefix frontend run check` → 0 error (18 warning lama).
+- staticcheck: tidak ada `U1000` tersisa di `internal/upstream`; sisa temuan
+  hanya `SA1019` deprecation `x/net/http2` di `client.go` (pra-eksisting).
+- Catatan operasional: prettier untuk fixture e2e HARUS dijalankan dengan cwd
+  `frontend/` (`cd frontend && node_modules/.bin/prettier --write e2e/fixtures/...`).
+  Dari root repo ia gagal `Cannot find package 'prettier-plugin-svelte'`.
+- Test baru: `TestWaitingRoomBudgetIndependentOfTransientRetries`,
+  `TestWaitingRoomBackoffShape` (bentuk backoff deterministik tanpa tidur),
+  `TestWaitingRoomRetries`, `TestWaitingRoomChainDisable`,
+  `TestEgressRelayWiringAndStealthOverride`.
+
+### Belum dikerjakan
+
+- `backend/internal/upstream/client.go` masih membawa perubahan egress
+  `UPSTREAM_EGRESS_URL` yang **belum di-commit** (relay sidecar OpenSSL).
+  Audit 2026-09-25 menemukan empat alasan blok ini **belum layak di-commit**:
+  1. `scripts/sidecar_tls.py` — relay yang jadi sandarannya — **tidak ada di
+     mana pun di repo** (`find . -name 'sidecar*'` kosong), jadi fitur ini
+     inert: tanpa relay, `UPSTREAM_EGRESS_URL` hanya membuat semua dial gagal.
+  2. Env var ini **melewati rantai knob wajib** (AGENTS.md §3): tidak ada
+     entri `keycatalog.go`, tidak masuk `.env.example`, tidak terdaftar di
+     `restartOnlyConfigKeys` / `effectiveConfigKV` — jadi tak muncul di UI dan
+     tak bisa diubah tanpa restart lewat jalur resmi.
+  3. **Kontradiksi desain**: `NewWithIndex` menyatakan dua kali bahwa egress
+     selalu DIRECT ("upstream server hard-blocks proxy/VPN/Tor egress") dan
+     menegakkannya via `transport.Proxy = nil` — tepat di atas blok relay ini.
+  4. **Bug**: blok stealth menimpa `transport.DialTLSContext` yang dipasang
+     relay, dan `http.Transport` memilih `DialTLSContext` untuk https — jadi
+     dengan `TLS_FINGERPRINT` apa pun (VPS pakai `auto`) relay tak pernah
+     dipakai walau deployment tampak terkonfigurasi.
+  Koreksi yang sudah masuk (non-breaking): klien kini **memperingatkan** saat
+  keduanya terpasang, alih-alih gagal senyap — plus test
+  `TestEgressRelayWiringAndStealthOverride` yang mem-pin wiring relay dan
+  override-nya secara behavioral (error dial membawa wrapper mana).
+  Keputusan akhir (A: relay menang / B: peringatkan — sudah ada / C: masukkan
+  ke rantai knob / D: hapus sesuai keputusan desain) **menunggu pemilik repo**.
+
+---
+
+## 2026-09-25 — re-pin upstream: 3d5300b / npm 0.0.196
+
+Pin lama `a9ef9942d` + `0.0.191` di-refresh ke
+`3d5300b6644c823970cb9588f6fde93ff3e39f2b` + npm `0.0.196`. Drift tepat 3 file,
+ketiganya FUNCTIONAL:
+
+- **`common/src/tools/constants.ts`** — `'report_project_profile'` masuk
+  `TOOLS_WHICH_WONT_FORCE_NEXT_STEP` dan `toolNames`.
+- **`packages/agent-runtime/src/run-agent-step.ts`** — modul `project-profile`
+  baru: `shouldOfferProjectProfileTool` + `runProjectProfileReport` sebelum
+  `finishAgentRun` (8 file baru upstream: `common/src/constants/project-profile.ts`,
+  `packages/agent-runtime/src/project-profile.ts`, `sdk/src/project-profile.ts`, dst).
+- **`common/src/constants/freebuff-models.ts`** — `FREEBUFF_PER_MODEL_SESSION_SPEND_CAPS`
+  + `getFreebuffPerModelSessionSpendCap` DIHAPUS (session pacing dihentikan), dan
+  GPT-5.6 Luna masuk `FREEBUFF_PAUSED_FREE_MODEL_IDS` (withdrawn 2026-09-24).
+
+Port sisi Go (wajib sebelum re-pin, sesuai `repin-all.sh`):
+
+- `convert/foreign_signals.go` `upstreamToolNames` += `report_project_profile`.
+  Tanpa ini request sah yang memakai tool baru upstream dibaca sebagai tool asing.
+- `modelcat/catalog_test.go` `wantPaused` += `openai/gpt-5.6-luna`; katalog hasil
+  regen sudah menandainya paused dengan replacement `z-ai/glm-5.3-flash`.
+
+Artefak hasil `go generate ./backend/internal/wirefacts/`: `wirefacts_gen.go`
+(SHA + `VendorVersion = "0.0.196"` + hash 12 snapshot), `modelcat/catalog_gen.go`,
+`upstream/wirecodes_gen.go`, `upstream/notices_gen.go`, `convert/toolnames_gen.go`.
+Dari 12 snapshot wire hanya 2 berubah byte (`run-agent-step.ts`,
+`tools/constants.ts`); dari 6 file registry hanya `freebuff-models.ts`.
+`scripts/vendor-version.txt` 0.0.191 -> 0.0.196.
+
+### Catatan operasional re-pin (penting untuk host ini)
+
+- `jq` TIDAK ada di PATH host ini, padahal `drift-exact.sh`,
+  `review-wire-drift.sh`, `repin-all.sh`, dan `check-upstream.sh` semuanya
+  membutuhkannya.
+- `scripts/drift-exact.sh:85` menjalankan `git fetch --unshallow` pada clone
+  shallow: di monorepo ini artinya mengunduh seluruh sejarah, dan script
+  menggantung > 10 menit lalu ke-kill. Isi blob dulu
+  (`git -C <clone> fetch --no-filter origin main`) sebelum menjalankannya.
+- Prettier untuk fixture e2e harus dijalankan dengan cwd `frontend/`.
+
