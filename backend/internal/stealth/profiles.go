@@ -428,7 +428,7 @@ func bunSpec() *utls.ClientHelloSpec {
 				utls.VersionTLS13,
 				utls.VersionTLS12,
 			}},
-			&utls.UtlsPaddingExtension{GetPaddingLen: func(clientHelloUnpaddedLen int) (paddingLen int, willPad bool) { return 232, true }},
+			&utls.UtlsPaddingExtension{GetPaddingLen: utls.BoringPaddingStyle},
 		},
 	}
 }
