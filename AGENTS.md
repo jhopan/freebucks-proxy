@@ -19,8 +19,14 @@ Machine-readable rules for agents working in this repo. Human overview lives in
   `API_KEYS` credential uses the pool, any other credential relays as bridge).
 - Upstream credits meter (wire fields: `freebucks*`): the wire `prices` map is
   the sole cost source; charge-once at session start; 1h sessions; `DELETE`
-  refund; Pacific-midnight refill. `deepseek/deepseek-v4-flash` is an unpriced
-  row (verified cost-0 live 2026-09-08).
+  refund. Two clocks, do not conflate them: `freebucks.daily` resets at
+  **00:00 UTC** (`resetTimeZone: "UTC"`), while the session-count `rateLimit`
+  resets at **midnight Pacific** (`resetTimeZone: "America/Los_Angeles"`).
+  Prices move — read `prices` live rather than trusting a note:
+  `deepseek/deepseek-v4-flash` was an unpriced cost-0 row on 2026-09-08 and is
+  **15** as of 2026-09-25 (10 off-peak, 22:00-06:00 UTC). Because each model
+  switch is a new session and therefore a new charge, switching models while
+  testing burns the daily budget (limit 25) fast.
 
 ## 2. Topology
 

@@ -775,3 +775,105 @@ dan itu satu-satunya lane yang membaca sinyal pilihan-klien. Karena itu
   yang tidak punya genuine member — perubahan ini memperluasnya ke kasus
   toolset kosong. Alternatifnya adalah ban.
 
+
+## 2026-09-25 — uji live akun baru: bukan ban, tapi kuota habis + endpoint iklan salah
+
+Diuji dengan akun baru (`jhoosuaapp`, sesi `active`, proxy `TLS_FINGERPRINT=bun
+HTTP2_UPSTREAM=false`, port 3457). Sepuluh request, 11m39s, **nol penanda ban**.
+
+### Temuan 1 — kegagalan BUKAN ban
+
+`grep -cE "BanError|account_banned|quarantin"` → 0. `GET
+/api/v1/freebuff/session` menjawab 200 dengan `quarantined:false`. Akun lama
+mati di retry ke-3; akun ini melewati retry ke-5 tanpa sanksi apa pun.
+
+### Temuan 2 — dua sebab terpisah, keduanya bukan sanksi
+
+1. **Freebucks harian habis.** `freebucks.daily = {limit:25, spent:25,
+   remaining:0, resetAt:"2026-09-26T00:00:00Z", resetTimeZone:"UTC"}`,
+   `balance:0`. Karena "charge-once at session start", tiap pindah model =
+   admission baru = charge baru: sesi `deepseek/deepseek-v4-flash` (15) +
+   `mimo/mimo-v2.5` (10) = 25 = jatah sehari penuh. Selama balance 0, model
+   berharga > 0 dijawab **429 lokal** (`freebucks balance insufficient`,
+   proxy tidak memanggil upstream). Refill **00:00 UTC / 07:00 WIB**.
+2. **Antrean 503 upstream.** Model berharga 0 (`stealth/space-bunny-alpha`)
+   lolos gerbang saldo, sesi + run 200, lalu chat dijawab **503 "The model is
+   temporarily unavailable"** dengan `Retry-After` yang **makin besar**
+   (14.7s → 25.3s → 73.1s → 117.7s). Sama untuk deepseek dan mimo, jadi
+   **independen model dan independen saldo**. `WAITING_ROOM_RETRIES` (4)
+   habis sebelum antrean cair.
+
+Bukan penyebab: `rateLimit` (limit 6, `recentCount:1.1`), reputasi IP
+(`ipPrivacySignals:null`), TLS transport (semua 200 di jalur non-chat).
+
+### Temuan 3 — negara: `ID` di luar allowlist (by design)
+
+`accessTier:"limited"`, `countryCode:"ID"`,
+`countryBlockReason:"country_not_allowed"`. `FREE_MODE_ALLOWED_COUNTRIES`
+(`common/src/constants/freebuff-countries.ts`) = US | CA GB AU NZ IE NO SE DK
+FI NL AT LU IS | DE FR ES IT PT BE CH LI MT KR. Indonesia hanya dapat tier
+`limited`. `CF-RAY:...-CGK` mengonfirmasi egress Jakarta.
+
+### Temuan 4 — BUG: endpoint auction iklan salah (menutup item terbuka sebelumnya)
+
+`ads.go` POST ke `https://freebuff.com/api/ads` → **400**
+`Invalid option: expected one of "ios"|"freebuff_web_chat"|"chat_assistant"|
+"chat_assistant_sr"|"cli_chat"`.
+
+`use-gravity-ad.ts:528-530` memilih
+`${capabilityRoute ? FREEBUFF_WEB_URL + '/api/ads' : WEBSITE_URL + '/api/v1/ads'}`,
+dan `capabilityRoute` hanya true bila `sponsoredCliCapability()` non-null.
+`WEBSITE_URL` = `https://www.codebuff.com`. Jadi rute normal CLI adalah
+**`https://www.codebuff.com/api/v1/ads`**, tempat `surface:"waiting_room"`
+sah.
+
+Dibuktikan live dengan token akun ini:
+
+| Rute | Payload | Hasil |
+|---|---|---|
+| `www.codebuff.com/api/v1/ads` | `surface:"waiting_room"`, `placementIds:["waiting-room-1"]` | **200** + `ads[0]` first-party |
+| `freebuff.com/api/ads` | sama | **400 Invalid option** |
+
+Ini menjawab syarat "butuh wire capture live sebelum menambah leg iklan":
+capture-nya sudah ada, dan rutenya salah.
+
+Diperiksa ulang dengan payload **persis seperti yang dikirim proxy**
+(termasuk blok `capabilityInspection` yang sebenarnya milik rute capability,
+dan header UA `Freebuff-CLI/0.0.191`): `POST www.codebuff.com/api/v1/ads` →
+**200 `provider:"first_party"`, `ads` berisi 1 entri**, dengan maupun tanpa
+`capabilityInspection` (2 percobaan masing-masing). Jadi blok itu diterima di
+rute ini dan tidak menekan pengiriman iklan. Catatan: auction kadang
+mengembalikan `ads: []` (inventaris kosong) — itu normal, bukan penolakan.
+
+### Temuan 5 — pin vendor kedaluwarsa
+
+Proxy mengaku `Freebuff-CLI/0.0.191` (`wirefacts_gen.go:10`,
+`scripts/vendor-version.txt`), CLI terpasang **0.0.196**
+(`freebuff-metadata.json`, `freebuff.exe --version`). Selain itu `prices` live
+menunjukkan `deepseek/deepseek-v4-flash` = **15** (peak) / 10 (off-peak
+22:00-06:00 UTC), sehingga catatan AGENTS.md "unpriced row, cost-0 (2026-09-08)"
+sudah basi.
+
+### Status
+
+Diterapkan di sesi ini:
+
+- `ads.go`: `adsBaseURL` → `https://www.codebuff.com`, path → `/api/v1/ads`
+  (komentar lama yang mengklaim "captured from the live CLI (POST
+  https://freebuff.com/api/ads)" diganti dengan alasan rute yang benar).
+- 4 file tes mengikuti path baru: `pool/bridge_gaps_test.go`,
+  `pool/pool_webhook_test.go`, `upstream/client_chat_test.go`,
+  `upstream/signal_guard_test.go`.
+- `AGENTS.md`: catatan harga dikoreksi + dua jam reset dipisahkan
+  (`freebucks.daily` 00:00 **UTC** vs `rateLimit` tengah malam **Pacific**).
+
+**Pin vendor TIDAK dinaikkan, sengaja.** `wirefacts_gen.go` adalah file
+*generated* (`cmd/wiregen`) dari `snapshots.json`, yang memaku
+`upstream_sha a9ef9942` + `vendor_version 0.0.191`. Menaikkan angkanya jadi
+0.0.196 akan mengklaim snapshot 0.0.191 sebagai 0.0.196. Lebih buruk:
+`scripts/vendor-version.txt` adalah **masukan version-gate** — `check-upstream.sh`
+membandingkannya dengan versi npm live, dan `skip` hanya true saat
+positif-SAMA. Menyetelnya ke 0.0.196 (yang kebetulan sama dengan live) akan
+membuat gate melaporkan SAME dan **melewati klasifikasi drift** yang justru
+sedang ingin menyala. Re-pin yang benar = alur serial wire → registry →
+dashboard, bukan suntingan angka. Sisa: `upstream-repin-3d5300b`.
