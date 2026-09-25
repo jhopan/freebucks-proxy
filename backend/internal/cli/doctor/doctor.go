@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"freebucks-proxy/backend/internal/bootcfg"
 	"freebucks-proxy/backend/internal/config"
 	"freebucks-proxy/backend/internal/egress"
 	"freebucks-proxy/backend/internal/registry"
@@ -128,7 +129,9 @@ func doctorSummary(passed, warnings, failed int) string {
 // exits 0 on success, 1 on failure. Exposed as -test-token for installers
 // and scripts.
 func RunTokenTest(configPath string) {
-	cfg, err := config.Load(configPath)
+	boot := bootcfg.Open()
+	cfg, err := bootcfg.Load(configPath, boot.Overlay)
+	_ = boot.Close()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "freebucks-proxy: -test-token: config load failed: %v\n", err)
 		os.Exit(1)
@@ -186,7 +189,21 @@ func Run(configPath string) {
 		failed++
 	}
 
-	cfg, err := config.Load(configPath)
+	// Resolve the SAME effective configuration Serve runs: the ADR-0019
+	// settings overlay beats the .env file, so reading the file alone would
+	// let the doctor report -- and probe -- a configuration the server never
+	// uses (observed live: a FAIL against a token the server never touched,
+	// while /healthz reported bridge mode).
+	boot := bootcfg.Open()
+	for _, n := range boot.Notices {
+		if n.Warn {
+			warn(n.Msg)
+		} else {
+			ok(n.Msg)
+		}
+	}
+	cfg, err := bootcfg.Load(configPath, boot.Overlay)
+	_ = boot.Close()
 	if err != nil {
 		fail(fmt.Sprintf("Config loading failed: %v", err))
 		fmt.Println(doctorSummary(passed, warnings, failed))

@@ -19,8 +19,8 @@ import (
 	// minimal images (alpine:3.20 has no /usr/share/zoneinfo) and Windows
 	// hosts without the timezone registry entries. Without this, Pacific
 	// resets fall back to a month-based approximation.
+	"freebucks-proxy/backend/internal/bootcfg"
 	"freebucks-proxy/backend/internal/cli/port"
-	"freebucks-proxy/backend/internal/clicreds"
 	"freebucks-proxy/backend/internal/config"
 	"freebucks-proxy/backend/internal/egress"
 	"freebucks-proxy/backend/internal/logring"
@@ -50,26 +50,16 @@ func Serve(configPath string, verbose bool, version string) int {
 	// OpenWithStatus also detects the file's data generation for the boot
 	// smart-migration report below: fresh init, legacy pre-goose stamp, or
 	// goose-converged (see the env-to-DB block after the logger exists).
-	var histStore *history.Store
-	var bootOverlay map[string]string
-	bootMigrate := history.MigrateStatus{Applied: []int{}}
-	{
-		dbPath := history.DBPathFromEnv()
-		if st, ms, err := history.OpenWithStatus(dbPath); err != nil {
-			fmt.Fprintln(os.Stderr, "freebucks-proxy: settings store unavailable; running live-only:", err)
-		} else {
-			histStore = st
-			bootMigrate = ms
-			if rows, err := st.ListSettings(); err != nil {
-				fmt.Fprintln(os.Stderr, "freebucks-proxy: settings overlay unreadable; running on file/env:", err)
-			} else if ov := config.OverlayFromRows(rows); len(ov) > 0 {
-				bootOverlay = ov
-				fmt.Fprintln(os.Stderr, "freebucks-proxy: applying", len(ov), "DB setting override(s)")
-			}
-		}
+	// The wiring lives in bootcfg so -doctor resolves the same configuration
+	// instead of a file/env-only approximation of it.
+	boot := bootcfg.Open()
+	for _, n := range boot.Notices {
+		fmt.Fprintln(os.Stderr, "freebucks-proxy: "+n.Msg)
 	}
+	histStore := boot.Store
+	bootMigrate := boot.Migrate
 
-	cfg, err := config.LoadOpts(configPath, config.LoadOptions{DiscoverCLIToken: clicreds.DiscoverToken, Overlay: bootOverlay})
+	cfg, err := bootcfg.Load(configPath, boot.Overlay)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "freebucks-proxy: invalid config:", err)
 		holdForExitIfConsole()

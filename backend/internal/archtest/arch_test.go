@@ -64,6 +64,11 @@ var allowed = map[string][]string{
 	"internal/wirefacts":      {}, // Wave D codegen foundation: verbatim upstream snapshots, stdlib only
 
 	// ---- layer 1: small dependents of config/leaves ----
+	"internal/bootcfg": { // the effective config, shared by Serve and -doctor
+		"internal/clicreds", // CLI-token auto-discovery, same hook Serve passes
+		"internal/config",
+		"internal/store", // ADR-0019 settings overlay
+	},
 	"internal/telemetry": {"internal/config"},
 	"internal/logring":   {"internal/telemetry"},
 	"internal/registry":  {"internal/config", "internal/modelcat"},
@@ -142,6 +147,7 @@ var allowed = map[string][]string{
 		"internal/store", // lifecycle wiring (open/spill/retention)
 	},
 	"internal/cli": {
+		"internal/bootcfg",
 		"internal/cli/port",
 		"internal/clicreds",
 		"internal/config",
@@ -164,6 +170,7 @@ var allowed = map[string][]string{
 	},
 	"internal/cli/service": {},
 	"internal/cli/doctor": { // -doctor diagnostics
+		"internal/bootcfg", // must resolve the SAME config Serve runs (ADR-0019 overlay)
 		"internal/config",
 		"internal/egress",
 		"internal/registry",

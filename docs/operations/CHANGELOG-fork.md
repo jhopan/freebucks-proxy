@@ -1118,3 +1118,55 @@ yang membuka store lalu memanggil `config.OverlayFromRows`, dipakai `cli` dan
     boot     : applying 46 DB setting override(s); auth_tokens=0 bridge_mode=true
     backup   : freebuff-proxy.bak-1.19.2.15-pre-alpn, .env.bak-pre-http2,
                .env.bak-pre-authtokens, data/freebuff.db.bak-pre-http2
+
+## 2026-09-25 — `-doctor` kini memakai konfigurasi efektif yang sama dengan `Serve`
+
+Celah yang dicatat di entri sebelumnya sudah diperbaiki. `Serve` membaca overlay
+settings ADR-0019 sebelum `config.Load` pertama, sementara `doctor.Run` memanggil
+`config.Load` langsung — jadi `-doctor` bisa melaporkan (dan memprobe)
+konfigurasi yang tidak dipakai server. Teramati live: FAIL
+`upstream account banned` terhadap token yang tidak pernah disentuh service,
+sementara `/healthz` melaporkan bridge mode.
+
+Wiring-nya sekarang hidup **sekali** di paket baru `internal/bootcfg`:
+
+- `bootcfg.Open()` — membuka store (`store.OpenWithStatus(store.DBPathFromEnv())`),
+  membaca `ListSettings()`, mengubahnya jadi overlay lewat
+  `config.OverlayFromRows`, lalu mengembalikan handle + overlay + `MigrateStatus`
+  + daftar `Notice{Warn, Msg}`. Setiap kegagalan non-fatal (jalan live-only).
+- `bootcfg.Load(configPath, overlay)` — satu definisi "konfigurasi yang
+  benar-benar dijalankan server": `config.LoadOpts` dengan
+  `DiscoverCLIToken: clicreds.DiscoverToken` dan `Overlay`.
+
+Dipakai `cli_serve.go` (Serve) dan `cli/doctor` (`Run` + `RunTokenTest`).
+Duplikasi sengaja dihindari: menambah `LoadOption` hanya untuk Serve akan
+membuka celah yang sama lagi.
+
+**Catatan perilaku**: karena `DiscoverCLIToken` kini juga aktif di `-doctor`,
+menjalankan `-doctor` di host yang CLI-nya login akan **memprobe token hasil
+auto-discovery** (probe zero-cost, tanpa klaim sesi, lewat klien ber-persona
+sama). Itu memang tujuannya — kalau CLI login ke akun yang di-ban, `-doctor`
+kini mengatakannya alih-alih menyembunyikannya di balik "bridge mode".
+
+### Matriks arsitektur diperluas (sengaja)
+
+`internal/bootcfg` ditambahkan ke allowlist
+`backend/internal/archtest/arch_test.go` (leaf deps: `clicreds`, `config`,
+`store`), plus entri di `internal/cli` dan `internal/cli/doctor`. Tanpa itu
+`TestBackendDependencyMatrix` merah.
+
+### Test
+
+`internal/bootcfg/bootcfg_test.go`:
+
+- `TestLoadAppliesOverlayOverFile` — overlay DB mengalahkan `.env`.
+- `TestLoadOverlayEmptiesAuthTokens` — kasus VPS: `.env` punya token, overlay
+  `AUTH_TOKENS=` kosong → bridge mode (AUTH_TOKENS presence-sensitive).
+- `TestSettingsCloseWithoutStore` — jalur live-only aman.
+
+Test-nya hermetik: `AUTO_DISCOVER_TOKEN=false` dipasang supaya `Load` tidak
+membaca `~/.config/manicode/credentials.json` milik mesin pengembang (teramati
+mengisi `AUTH_TOKENS` dari login CLI nyata saat pertama dijalankan).
+
+Verifikasi: `gofmt` bersih, `go build ./...` OK, `go vet ./...` bersih,
+`go test ./...` hijau seluruh paket (termasuk e2e dan `archtest`).

@@ -186,9 +186,12 @@ Do not confuse the two — they need opposite responses:
 A banned token left in the configuration is a **latent** 403. On the VPS the
 `.env` still carried the banned account's token, and the only thing keeping the
 service in bridge mode was a DB overlay row (`config:AUTH_TOKENS`, empty).
-Overlay rows are invisible to `-doctor` and easy to lose — a dashboard save, a
-cleared overlay, or a restored DB snapshot would have put the banned token
-straight back into use.
+Overlay rows are easy to lose — a dashboard save, a cleared overlay, or a
+restored DB snapshot would have put the banned token straight back into use.
+
+`-doctor` now resolves the **same effective configuration as the server**,
+including the DB overlay (`internal/bootcfg`, shared by Serve and the doctor),
+so it can no longer report — and probe — a token the running server ignores.
 
 When an account is banned:
 
