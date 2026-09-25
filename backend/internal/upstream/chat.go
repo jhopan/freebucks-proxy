@@ -171,6 +171,15 @@ func (c *Client) ChatCompletions(ctx context.Context, opts ChatOptions, body []b
 				if waitingRoom {
 					msg = "upstream waiting room, retrying same session"
 					c.waitingRoomRetries.Add(1) // lifetime metric
+					// Fork 2026-09-25: the CLI spends its wait running the
+					// waiting_room ad surface (gravity/zeroclick fetch +
+					// impression/click + streak) — use-gravity-ad.ts with
+					// surface="waiting_room". A client that queues without
+					// ever producing that engagement is the shape upstream
+					// flagged and banned on 2026-09-24/25. Fire the same
+					// best-effort chain once per queued chat so the wait
+					// looks like the CLI's wait.
+					go c.FireWaitingRoomChain(context.Background())
 				} else {
 					c.capacityDeferredRetries.Add(1) // lifetime metric
 				}
