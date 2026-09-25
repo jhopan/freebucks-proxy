@@ -619,3 +619,52 @@ Dari 12 snapshot wire hanya 2 berubah byte (`run-agent-step.ts`,
   (`git -C <clone> fetch --no-filter origin main`) sebelum menjalankannya.
 - Prettier untuk fixture e2e harus dijalankan dengan cwd `frontend/`.
 
+---
+
+## 2026-09-25 — koreksi persona TLS: `auto` bukan CLI-faithful
+
+### Temuan
+
+`TLS_FINGERPRINT=auto` (dipakai VPS) diselesaikan
+`stealth.GetProfileForConnection` menjadi salah satu **profil browser**:
+`chrome126 | firefox128 | safari18 | edge126`. Preset itu membawa User-Agent
+browser + `Sec-CH-UA` — jadi lapisan TLS/header berkata "browser", sementara
+amplop request-nya meniru **CLI** (Bun/BoringSSL, yang TIDAK mengirim header
+browser). Dua paruh persona itu saling bertentangan, dan jalur admission
+upstream mem-fingerprint keduanya.
+
+Asumsi lama tercatat di changelog 2026-09-24: Bun disebut "Chrome-class"
+sehingga preset Chrome utls dinilai "sama class". Itu keliru — ClientHello
+Bun 1.3.14 (`docs/operations/bun-1.3.14-clienthello.txt`) punya 17 cipher,
+ALPN **http/1.1 saja**, padding 232 byte, dan **tanpa GREASE**, sedangkan
+preset Chrome mengirim GREASE, ALPN h2+http/1.1, dan cipher berbeda.
+"Chrome-class" bukan "ClientHello yang sama". Yang benar-benar cocok adalah
+`TLS_FINGERPRINT=bun` (`ProfileBun`, spec hasil capture live) — dan itu
+satu-satunya nilai yang self-consistent, karena ia juga tidak mengirim UA.
+
+### Perubahan
+
+- **`doctor`**: cek baru `tlsFingerprintRow`. `bun` dan default (plain Go)
+  lolos `[ok]`; `auto`/`random`/nama browser memunculkan `[!!]` yang selalu
+  menyebut remediasi `TLS_FINGERPRINT=bun`. Diverifikasi end-to-end:
+  `-doctor` dengan `auto` -> `[!!]`, dengan `bun` -> `[ok]`.
+- **`keycatalog`**: deskripsi `TLS_FINGERPRINT` + `SAFE_MODE` tidak lagi
+  menganjurkan `auto` untuk IP datacenter, dan tidak lagi menyebut default
+  sebagai "plain Go/Bun baseline"; `bun` kini disebut sebagai pilihan
+  CLI-faithful.
+- **`.env.example` / `.env.full-example`**: koreksi yang sama.
+- Fixture e2e `config-meta.json` diregenerasi (`FP_REGEN_FIXTURE=1`) + prettier.
+
+**Perilaku tidak berubah**: default tetap kosong (plain Go) dan tidak ada nilai
+`TLS_FINGERPRINT` yang berubah arti. Ini menambah diagnostik + membetulkan
+panduan yang menyesatkan.
+
+### Tindak lanjut untuk VPS
+
+Ubah `.env` VPS: `TLS_FINGERPRINT=auto` -> `TLS_FINGERPRINT=bun`, lalu restart
+(knob restart-only). Verifikasi dengan `freebucks-proxy -doctor` (harus `[ok]`).
+
+Batasnya: ini **tidak** menyelesaikan gerbang reputasi IP. Kalau IP egress
+terbaca `hosting`/`service` oleh ipinfo/Spur/Scamalytics, penyelesaiannya ada
+di infrastruktur (egress yang bersih), bukan di kode.
+
