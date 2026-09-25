@@ -481,7 +481,7 @@ func TestSessionCallsStampFirstTabDiscount(t *testing.T) {
 }
 
 // TestWaitingRoomChainFiresAdLegs pins the live-CLI wire shape of the chain:
-// exactly ONE POST /api/ads, to the primary provider, carrying the
+// exactly ONE POST /api/v1/ads, to the primary provider, carrying the
 // Freebuff-CLI product UA + Bearer token, surface "waiting_room" and the
 // browser-like body userAgent — and NO impression/click legs, which the CLI
 // never sends (the regression that retired the fabricated pair). Best-effort
@@ -497,12 +497,12 @@ func TestWaitingRoomChainFiresAdLegs(t *testing.T) {
 	client.FireWaitingRoomChain(context.Background(), "")
 	var adsReq *recordedReq
 	for _, r := range srv.snapshot() {
-		if r.method == http.MethodPost && r.path == "/api/ads" {
+		if r.method == http.MethodPost && r.path == "/api/v1/ads" {
 			adsReq = &r
 		}
 	}
 	if adsReq == nil {
-		t.Fatal("no recorded POST /api/ads (live-CLI shape: one auction per episode)")
+		t.Fatal("no recorded POST /api/v1/ads (live-CLI shape: one auction per episode)")
 	}
 	if got := adsReq.header.Get("User-Agent"); got != freebuffCliUA {
 		t.Errorf("ads User-Agent = %q, want the CLI product UA %q", got, freebuffCliUA)
@@ -526,8 +526,7 @@ func TestWaitingRoomChainFiresAdLegs(t *testing.T) {
 	}
 	// Live-capture regression: the CLI sends NO impression/click legs.
 	for _, r := range srv.snapshot() {
-		if r.path == "/api/v1/ads/impression" || r.path == "/api/v1/ads/click" ||
-			r.path == "/api/ads/impression" || r.path == "/api/ads/click" {
+		if r.path == "/api/v1/ads/impression" || r.path == "/api/v1/ads/click" {
 			t.Errorf("unexpected %s %s — the live CLI sends no impression/click legs", r.method, r.path)
 		}
 	}

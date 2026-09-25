@@ -111,11 +111,30 @@ func (c *Client) FireWaitingRoomChain(ctx context.Context, sessionID string) {
 	}
 }
 
-// adsBaseURL is the ads origin — freebuff.com (the WEB origin), NOT the
-// API base www.codebuff.com. Captured from the live CLI (POST
-// https://freebuff.com/api/ads). Tests point it at the mock via
-// SetAdsBaseURLForTest.
-var adsBaseURL = "https://freebuff.com"
+// adsBaseURL is the ads origin. The host and the path are chosen together by
+// use-gravity-ad.ts:528-530:
+//
+//	`${capabilityRoute ? FREEBUFF_WEB_URL : WEBSITE_URL}${capabilityRoute ? '/api/ads' : '/api/v1/ads'}`
+//
+// capabilityRoute is true only when sponsoredCliCapability() resolved, so the
+// ordinary CLI auction is WEBSITE_URL + "/api/v1/ads", where WEBSITE_URL is
+// NEXT_PUBLIC_CODEBUFF_APP_URL — prod https://www.codebuff.com
+// (common/src/env-schema.ts:7, common/src/ads/local-agentic-test.test.ts:39).
+//
+// The freebuff.com/api/ads branch is a DIFFERENT endpoint with a DIFFERENT
+// surface enum. It rejects surface "waiting_room" outright:
+//
+//	400 {"error":"Invalid request body","details":{"surface":{"_errors":
+//	  ["Invalid option: expected one of \"ios\"|\"freebuff_web_chat\"|
+//	    \"chat_assistant\"|\"chat_assistant_sr\"|\"cli_chat\""]}}}
+//
+// This fork previously posted there, so EVERY waiting-room chain 400'd and
+// the pre-session ad engagement never reached upstream. Verified live
+// 2026-09-25 against a real token, same payload both ways:
+// www.codebuff.com/api/v1/ads + surface "waiting_room" + placementIds
+// ["waiting-room-1"] -> 200 with a first-party ad; freebuff.com/api/ads ->
+// 400 above. Tests point it at the mock via SetAdsBaseURLForTest.
+var adsBaseURL = "https://www.codebuff.com"
 
 // SetAdsBaseURLForTest repoints the ads origin (test-only).
 func SetAdsBaseURLForTest(u string) func() {
@@ -160,11 +179,11 @@ func (c *Client) requestAds(ctx context.Context, provider, sessionID string) (st
 		payload["sessionId"] = sessionID
 	}
 	body, _ := json.Marshal(payload)
-	// The ads auction lives on freebuff.com (the WEB origin), NOT on the
-	// API base www.codebuff.com — captured from the live CLI
-	// (POST https://freebuff.com/api/ads). newRequest concatenates
-	// c.baseURL, so build the request directly against the ads origin.
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, adsBaseURL+"/api/ads", bytes.NewReader(body))
+	// The ads auction is a sibling route on the ads origin, reached directly
+	// rather than through newRequest (see adsBaseURL for why the host and
+	// path are chosen together). newRequest would also stamp the chat
+	// ai-sdk UA, which the header UA below deliberately replaces.
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, adsBaseURL+"/api/v1/ads", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}

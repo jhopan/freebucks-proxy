@@ -983,7 +983,7 @@ func TestWaitingRoomChainWireFidelity(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		switch {
-		case r.URL.Path == "/api/ads" && r.Method == http.MethodPost:
+		case r.URL.Path == "/api/v1/ads" && r.Method == http.MethodPost:
 			adsHits++
 			adsHeaders = r.Header.Clone()
 			_ = json.NewDecoder(r.Body).Decode(&adsBody)
