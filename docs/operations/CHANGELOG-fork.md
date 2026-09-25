@@ -1069,3 +1069,52 @@ sementara `.env` sudah `TLS_FINGERPRINT=bun`. Perbaikan:
 - Penjaga ALPN baru **belum ter-deploy** ke VPS — binary `1.19.2.15` di sana
   dibangun sebelum perubahan ini, jadi peringatan boot-nya belum aktif.
 - `UPSTREAM_EGRESS_URL` masih inert; opsi A/B/C/D masih menunggu pemilik repo.
+
+## 2026-09-25 — temuan lanjutan: token banned di `.env` VPS + celah diagnostik `-doctor`
+
+Saat memverifikasi baris ALPN baru lewat `-doctor` di VPS, muncul FAIL yang
+tidak terduga:
+
+    [FAIL] Token #1 validity probe failed: upstream account banned: {"status":"banned"}
+
+Padahal `/healthz` melaporkan `mode:"bridge"`, `auth_tokens=0`. Penyebabnya:
+`.env` VPS masih menyimpan **token yang sudah di-ban** (36 karakter), dan
+**hanya** baris overlay DB `config:AUTH_TOKENS` (bernilai kosong; presence →
+bridge mode + mematikan auto-discovery) yang mencegah service memakainya.
+
+Bahaya laten: kalau baris DB itu hilang (dashboard menyimpan ulang, overlay
+dibersihkan, DB dipulihkan dari snapshot lama), service langsung memakai token
+banned → setiap request 403. `.env` sekarang menyatakan bridge mode secara
+eksplisit: token dikomentari (nilai tersimpan di `.env.bak-pre-authtokens`)
+dan `AUTH_TOKENS=` kosong ditulis apa adanya — persis bentuk yang ditulis
+dashboard saat beralih ke bridge mode.
+
+### Celah diagnostik: `-doctor` tidak menerapkan overlay DB
+
+`Serve` memuat konfigurasi lewat `config.LoadOpts(..., LoadOptions{Overlay:
+bootOverlay})` (`cli_serve.go:50-71`), tetapi `doctor.Run` memakai
+`config.Load(configPath)` = `LoadOpts(path, LoadOptions{})` **tanpa overlay**.
+Akibatnya `-doctor` dapat melaporkan konfigurasi yang TIDAK dipakai server —
+di VPS ini ia menghasilkan FAIL palsu dengan memprobe token yang tidak pernah
+disentuh service.
+
+Ini juga sebabnya memindahkan `HTTP2_UPSTREAM` ke `.env` penting: `-doctor`
+hanya melihat tier file/env, jadi nilai yang hidup **hanya** di DB tidak akan
+terlihat olehnya.
+
+**Belum diperbaiki** (butuh keputusan struktur paket): `-doctor` seharusnya
+memuat overlay yang sama dengan `Serve`. Jalur bersih: satu helper bersama
+yang membuka store lalu memanggil `config.OverlayFromRows`, dipakai `cli` dan
+`cli/doctor` (aman — `cli` tidak mengimpor `cli/doctor`).
+
+### Verifikasi akhir VPS (`vps-natusa`)
+
+    binary   : 1.19.2.16 (sha256 32d555d1…, identik lokal↔VPS sebelum dipasang)
+    systemd  : active
+    healthz  : {"status":"ok","mode":"bridge","egress_region":"US"}
+    -doctor  : 10 passed, 1 warning (bridge mode), 0 failed
+               [ok] TLS_FINGERPRINT=bun
+               [ok] HTTP2_UPSTREAM=false
+    boot     : applying 46 DB setting override(s); auth_tokens=0 bridge_mode=true
+    backup   : freebuff-proxy.bak-1.19.2.15-pre-alpn, .env.bak-pre-http2,
+               .env.bak-pre-authtokens, data/freebuff.db.bak-pre-http2

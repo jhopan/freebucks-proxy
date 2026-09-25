@@ -181,6 +181,23 @@ Do not confuse the two — they need opposite responses:
   cost-0 on 2026-09-08 and was **15** (10 off-peak, 22:00–06:00 UTC) on
   2026-09-25.
 
+## 8. Config hygiene: remove a banned token from the active path
+
+A banned token left in the configuration is a **latent** 403. On the VPS the
+`.env` still carried the banned account's token, and the only thing keeping the
+service in bridge mode was a DB overlay row (`config:AUTH_TOKENS`, empty).
+Overlay rows are invisible to `-doctor` and easy to lose — a dashboard save, a
+cleared overlay, or a restored DB snapshot would have put the banned token
+straight back into use.
+
+When an account is banned:
+
+1. Comment the token out of `.env` and write `AUTH_TOKENS=` explicitly — the
+   exact form the dashboard writes when switching to bridge mode.
+2. Keep the value in a dated backup, not in the live file.
+3. Re-run `-doctor`: a banned token surfaces as
+   `[FAIL] Token #N validity probe failed: upstream account banned`.
+
 ---
 
 ## Pre-flight checklist for a new account
@@ -192,8 +209,9 @@ Do not confuse the two — they need opposite responses:
    rewrites the CLI's `http/1.1`-only ALPN into `h2,http/1.1` (§3a).
 3. **Run on a residential egress**, not a VPS.
 4. **Leave `WAITING_ROOM_CHAIN` at its default (on).**
-5. **Verify with `-doctor`**, not with curl. Expect the token probe to pass and
-   the egress region to read as a non-datacenter country.
+5. **Verify with `-doctor`**, not with curl. Expect `0 failed`, the persona and
+   ALPN rows both `[ok]`, and the egress region to read as a non-datacenter
+   country. A banned token left in the config surfaces here as a `[FAIL]`.
 6. **Do not switch models to "test"** — every switch is a fresh charge against a
    25-unit daily budget.
 7. **Expect the waiting room on first contact.** A 503 with a `Retry-After` is a
