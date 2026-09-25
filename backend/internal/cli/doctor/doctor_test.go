@@ -117,6 +117,44 @@ func TestDoctorSummary(t *testing.T) {
 	}
 }
 
+// TestTLSFingerprintRow pins the TLS persona check: the gateway impersonates
+// the CLI, so `bun` (the exact Bun 1.3.14 ClientHello) and the plain-Go
+// default pass, while every BROWSER persona is a warning because it carries a
+// browser User-Agent + Sec-CH-UA against a CLI request envelope.
+func TestTLSFingerprintRow(t *testing.T) {
+	cases := []struct {
+		name     string
+		in       string
+		wantWarn bool
+		contains string
+	}{
+		{"unset is plain Go", "", false, "plain Go TLS"},
+		{"bun is CLI-faithful", "bun", false, "CLI-faithful"},
+		{"bun is case-insensitive", "BUN", false, "CLI-faithful"},
+		{"auto resolves to a browser", "auto", true, "BROWSER preset"},
+		{"random resolves to a browser", "random", true, "BROWSER preset"},
+		{"explicit chrome", "chrome126", true, "browser TLS persona"},
+		{"explicit safari", "safari18", true, "browser TLS persona"},
+		{"explicit firefox", "firefox128", true, "browser TLS persona"},
+		{"explicit edge", "edge126", true, "browser TLS persona"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			msg, warn := tlsFingerprintRow(tc.in)
+			if warn != tc.wantWarn {
+				t.Errorf("tlsFingerprintRow(%q) warn = %v, want %v", tc.in, warn, tc.wantWarn)
+			}
+			if !strings.Contains(msg, tc.contains) {
+				t.Errorf("tlsFingerprintRow(%q) = %q, want it to mention %q", tc.in, msg, tc.contains)
+			}
+			// Every warning must point the operator at the CLI-faithful knob.
+			if warn && !strings.Contains(msg, "TLS_FINGERPRINT=bun") {
+				t.Errorf("tlsFingerprintRow(%q) = %q, want the bun remediation", tc.in, msg)
+			}
+		})
+	}
+}
+
 // TestSharedSubnetworkAdvisory pins the issue #140 print: every pooled
 // token in one deployment shares one egress /24, so the doctor always
 // prints a shared-network advisory when 2+ tokens are configured. Single-

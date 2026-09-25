@@ -141,7 +141,7 @@ var keyCatalog = []KeyDef{
 	{
 		Key: "SAFE_MODE", Group: GroupGeneral, Kind: "bool", Essential: true,
 		Default:     "true",
-		Description: `Apply the anti-ban preset when a knob is left unset: idle-run rotation 30m, request jitter 200ms. TLS is CLI-faithful (plain Go/Bun baseline; set TLS_FINGERPRINT=auto for browser-evasion on datacenter IPs). Keep on.`,
+		Description: `Apply the anti-ban preset when a knob is left unset: idle-run rotation 30m, request jitter 200ms. TLS stays on the plain Go default unless TLS_FINGERPRINT is set; on a datacenter IP prefer TLS_FINGERPRINT=bun (the CLI's own ClientHello) over the browser presets, which contradict the CLI request envelope. Keep on.`,
 	},
 
 	// ── pool ─────────────────────────────────────────────────────────────
@@ -356,7 +356,7 @@ var keyCatalog = []KeyDef{
 		Key: "TLS_FINGERPRINT", Group: GroupUpstream, Kind: "select",
 		Enum:        []string{"auto", "bun", "chrome120", "chrome126", "safari17", "safari18", "firefox120", "firefox128", "edge126", "random"},
 		RestartOnly: true, Default: "", Hidden: true,
-		Description: `TLS fingerprint for upstream egress (empty = plain Go/Bun baseline, CLI-faithful; auto/browser values use utls to mimic browser JA3 for WAF evasion on datacenter IPs).`,
+		Description: `TLS fingerprint for upstream egress. "bun" sends the exact Bun 1.3.14 ClientHello captured from the shipped CLI (no browser headers) — the CLI-faithful choice, and the right one on a datacenter IP because the request envelope already impersonates the CLI. Empty = plain Go TLS. auto/random/chrome/safari/firefox/edge switch to a BROWSER persona (browser JA3 plus browser User-Agent and Sec-CH-UA), which contradicts the CLI envelope: deliberate WAF evasion only. "-doctor" warns when a browser persona is set.`,
 	},
 	{
 		Key: "TRANSIENT_RETRIES", Group: GroupUpstream, Kind: "int", RestartOnly: true, Hidden: true,
