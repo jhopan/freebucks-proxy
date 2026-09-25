@@ -42,9 +42,21 @@ func capHint(a, b int) int {
 // context without re-running normalization.
 func normalizeToolSchemas(payload map[string]any, opts Options) {
 	tools, _ := payload["tools"].([]any)
-	if len(tools) == 0 {
-		return
-	}
+	// A tool-less request MUST still reach injectEndTurnTool below: the
+	// foreign_toolset gate keys on the wire carrying at least one GENUINE
+	// signature tool, and the end_turn/decide pseudo-tools are documented as
+	// "injected into every upstream request" (openai_chunk_pipeline.go). An
+	// early return here (the pre-fix shape) let a request with no `tools` key
+	// — or `tools: []`, which is what any plain OpenAI-compatible client
+	// sends — go upstream carrying NOTHING but the caller's own toolset. That
+	// is the third_party_client shape: the free-mode gate classifies a
+	// request with no genuine signature member as third-party, downgrades it,
+	// and the trust system sticky-caps the account
+	// (toolmap_request.go:14-19). Reproduced live 2026-09-25: a tool-less
+	// chat (`tools=0`) was admitted, queued on a 503 waiting room, and
+	// banned on the third retry with "accessing Freebuff with a third-party
+	// client or proxy".
+	//
 	// One node budget per request, shared across tools.
 	budget := opts.MaxSchemaNodes
 	hasEndTurn := false

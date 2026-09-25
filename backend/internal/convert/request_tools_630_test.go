@@ -11,8 +11,13 @@ import "testing"
 // the vendor gate (3420c99 foreign-client-signals.ts) reads it, so the
 // trigger attribution stays evidence instead of lore:
 //
-//   - no tools: normalize emits no tools array at all (the injection
-//     early-returns on empty) — the gate's tool leg never runs. Clear.
+//   - no tools: normalize STILL emits the first-party pin (glob + end_turn
+//     + decide). It used to early-return on empty and leave the wire bare
+//     ("the gate's tool leg never runs"), but the live server-side
+//     tool-schema check keys on the wire carrying a GENUINE signature tool,
+//     and a bare wire is the third_party_client shape — reproduced live
+//     2026-09-25 (tool-less chat admitted, then banned on the third queued
+//     retry). See normalizeToolSchemas.
 //   - tools=[test_tool]: wire carries test_tool verbatim plus the
 //     injected hollow end_turn. The tool leg reads foreign_toolset
 //     (enforced) with the injection logged as hollow — but test_tool
@@ -67,16 +72,31 @@ func toolNamesOf(tools []any) []string {
 	return names
 }
 
-func TestIssue630NoToolsWireIsBare(t *testing.T) {
+// TestIssue630NoToolsWireCarriesSignaturePin pins the post-fix shape: a
+// tool-less request must NOT go upstream bare. The injection used to
+// early-return when the client offered no tools, so the wire carried no
+// genuine signature member at all — which is the shape the live server-side
+// tool-schema check reads as a third-party client (downgrade + sticky cap).
+// Reproduced live 2026-09-25 against a real account.
+func TestIssue630NoToolsWireCarriesSignaturePin(t *testing.T) {
 	tools := wireToolsOf(t, map[string]any{
 		"model":    "deepseek/deepseek-v4-flash",
 		"messages": []any{map[string]any{"role": "user", "content": "Say hello in one sentence."}},
 	})
-	if len(tools) != 0 {
-		t.Fatalf("no-tools request emitted %d wire tools, want none", len(tools))
+	names := toolNamesOf(tools)
+	want := []string{"glob", "end_turn", "decide"}
+	if len(names) != len(want) {
+		t.Fatalf("no-tools request emitted %d wire tools %q, want %q", len(names), names, want)
 	}
+	for i := range want {
+		if names[i] != want[i] {
+			t.Fatalf("wire tools = %q, want %q", names, want)
+		}
+	}
+	// glob must read GENUINE (canonical name + canonical parameter key), so
+	// the tool leg of the foreign-client check sees a first-party toolset.
 	if s := WireForeignSignal(ClassifyWireTools(tools)); s != "" {
-		t.Errorf("signal = %q, want clear", s)
+		t.Errorf("signal = %q, want clear (genuine signature member present)", s)
 	}
 }
 

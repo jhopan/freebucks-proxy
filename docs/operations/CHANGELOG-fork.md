@@ -668,3 +668,110 @@ Batasnya: ini **tidak** menyelesaikan gerbang reputasi IP. Kalau IP egress
 terbaca `hosting`/`service` oleh ipinfo/Spur/Scamalytics, penyelesaiannya ada
 di infrastruktur (egress yang bersih), bukan di kode.
 
+---
+
+## 2026-09-25 — ban live: wire TANPA tools = bentuk `third_party_client`
+
+### Temuan (reproduksi live, akun nyata)
+
+Uji lokal dengan `TLS_FINGERPRINT=bun` + `HTTP2_UPSTREAM=false` membuktikan
+koreksi persona TLS berhasil: `GET /api/v1/me`, `GET /api/v1/freebuff/streak`,
+`POST /api/v1/freebuff/session/admission`, `POST /api/v1/agent-runs` semuanya
+**200** dan sesi aktif (`status=active`). Jadi transport-level sudah beres.
+
+Yang tersisa: `POST /api/v1/chat/completions` menjawab **503 WaitingRoomError**
+(`"The model is temporarily unavailable. Please try again later."`) dengan
+`Retry-After` yang menaik — 11.7s -> 39.9s -> 1m15s -> 1m46s (backoff poll
+vendor, sesuai desain). Pada retry **ketiga** upstream menjawab **403**:
+
+    {"error":"account_suspended","message":"Your account has been suspended for
+     accessing Freebuff with a third-party client or proxy. Free mode is only
+     available through official Freebuff clients (the CLI, Desktop, and
+     freebuff.com). ..."}
+
+Proxy menandainya `class=BanError` / `state=banned` dan mengkarantina token.
+Akun lokal yang sebelumnya `-validate-tokens` melaporkan `OK / clean` kini
+**mati**.
+
+### Akar masalah: wire berangkat tanpa satu pun tool
+
+Log proxy menunjukkan tiap chat request membawa `tools=0`. Ditelusuri ke
+`normalizeToolSchemas` (`convert/schemacache_store.go`): ada **early-return
+saat `len(tools) == 0`**, sehingga `injectEndTurnTool` tidak pernah dipanggil
+dan wire berangkat **tanpa tools sama sekali**. Probe atas jalur konversi
+nyata (bukan tebakan):
+
+    no-tools-key   -> wire tools (0): []
+    empty-tools    -> wire tools (0): []
+    one-foreign    -> wire tools (4): [my_custom glob end_turn decide]
+
+Wire kosong itu tepat bentuk yang di-flag. Dua sumber di repo ini sudah
+menuliskannya lebih dulu:
+
+- `convert/toolmap_request.go:14-19` — gate free-mode mengklasifikasi request
+  tanpa signature tool sebagai third-party, dan
+  **"the trust system permanently caps any account seen sending a foreign tool
+  schema (third_party_client sticky cap)"**.
+- Snapshot upstream saat ini, `common/src/constants/freebuff-models.ts:4630` —
+  detektor third-party yang hidup adalah **tool-schema check**
+  (`docs/freebuff-abuse-detection.md`, privat), yang *"downgrades third-party
+  clients on every model, **but not a caller who has faithfully reproduced our
+  toolset**"*. Diperkuat `freebuff-cost-mode.ts:68-86`: ada jalur **downgrade**
+  + sticky flag + baris `ban_event` (hukuman), dengan `FREEBUFF_BAN_EXEMPT_USER_IDS`
+  sebagai satu-satunya pengecualian hukuman — deteksi sendiri tidak pernah
+  ditekan.
+
+Catatan koreksi: `foreign_signals.go` + `cf_worker_signals.go` menyimpulkan gate
+LIVE bersifat *tools-blind* (detektor lama `foreign-client-signals.ts` memang
+dihapus dari pohon publik setelah reversal 659 akun — semua simbolnya sudah
+tidak ada di snapshot sekarang). Kesimpulan itu **benar untuk gate cf-worker**
+(edge-stamped, `cf-worker`/`cf-ray`), tapi **tidak lengkap**: lane tool-schema
+tetap hidup di sisi server (privat, `web/src/app/api/v1/chat/completions/_post.ts`),
+dan itu satu-satunya lane yang membaca sinyal pilihan-klien. Karena itu
+"wire tanpa tools aman" adalah kesimpulan yang salah.
+
+### Perubahan
+
+- **`normalizeToolSchemas`**: early-return `len(tools) == 0` **dihapus**, jadi
+  `injectEndTurnTool` benar-benar berjalan *"on every upstream request"* seperti
+  yang sudah didokumentasikan `openai_chunk_pipeline.go:78-80`. Request tanpa
+  tools kini berangkat membawa `glob` (genuine signature: nama canonical +
+  subset canonical keys `pattern`) + `end_turn` + `decide`.
+  `end_turn`/`decide` sudah di-strip di **semua** jalur respons
+  (`openai_stream`, `openai_chunk_pipeline`, `anthropic_json`,
+  `anthropic_stream`, `responses_stream`, `stream_shared`), jadi klien tidak
+  pernah melihatnya; `finish_reason` juga sudah diflip bila hanya pseudo-call.
+- **Test yang mem-pin perilaku lama diperbarui** (bukan dihapus, supaya
+  pembalikan keputusan ini tercatat):
+  `TestIssue630NoToolsWireIsBare` -> `TestIssue630NoToolsWireCarriesSignaturePin`
+  (`request_tools_630_test.go`, plus komentar kepala file),
+  matriks `TestIssue630MatrixLiveGateClear` (`cf_worker_signals_test.go`), dan
+  `TestTranslateMatrixRequestLeg` subtest 01/02 (`tooltranslate_matrix_test.go`).
+- **Test e2e baru** `TestToolLessChatWireCarriesFirstPartyPin`
+  (`internal/server/notools_wire_e2e_test.go`): handler asli + mock upstream,
+  klien tanpa tools. Log masuk tetap `tools=0`, tapi body yang **direkam
+  upstream** berisi `glob,end_turn,decide`.
+- `go test ./backend/...` hijau (EXIT=0).
+
+### Batasan
+
+- Ini menutup satu-satunya vektor third-party yang **disebut upstream sendiri**.
+  Yang belum ditutup:
+  1. **Tidak ada engagement iklan selama antrean 503.** Komponen `<Chat>` CLI
+     (`cli/src/chat.tsx:212`) menjalankan `useGravityAd({surface:'cli_chat'})`
+     selama chat ter-mount, jadi CLI nyata terus menghasilkan auction iklan
+     selagi queued; proxy tidak mengirim request iklan sama sekali di jendela
+     itu. `chat.go:191-204` sengaja tidak memanggil chain di sana dengan alasan
+     "CLI hanya menjalankan poll loop" — alasan itu tidak lengkap (poll loop
+     memang tidak mengambil iklan, tapi surface Chat-nya iya). Belum
+     diimplementasikan karena `ads.go` mensyaratkan **wire capture live**
+     sebelum menambah leg baru.
+  2. **Reputasi IP egress** (infrastruktur, bukan kode).
+- Akun yang sudah banned tetap mati — verifikasi end-to-end butuh akun baru
+  (`-validate-tokens` akan melaporkan `BANNED` untuk token lama).
+- Efek samping yang diterima: klien tanpa tools kini bisa menerima stray
+  `tool_call` bernama `glob` (ia tidak di-strip, karena `glob` adalah tool
+  signature asli). Risiko ini sudah ada sebelumnya untuk toolset kelas Hermes
+  yang tidak punya genuine member — perubahan ini memperluasnya ke kasus
+  toolset kosong. Alternatifnya adalah ban.
+

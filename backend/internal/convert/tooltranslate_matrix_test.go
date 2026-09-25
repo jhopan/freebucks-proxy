@@ -141,17 +141,24 @@ func matrixChatBody(tools []any, extra map[string]any) map[string]any {
 }
 
 func TestTranslateMatrixRequestLeg(t *testing.T) {
-	t.Run("01 no tools bare wire", func(t *testing.T) {
+	t.Run("01 no tools carries first-party pin", func(t *testing.T) {
 		wire, _ := matrixWire(t, matrixChatBody(nil, nil))
-		if _, ok := wire["tools"]; ok {
-			t.Fatalf("wire carries tools for a tool-less request: %v", wire["tools"])
+		names := matrixWireNames(t, wire)
+		assertWireSane(t, names)
+		// A bare wire is the third_party_client shape (see
+		// normalizeToolSchemas): the request must reach upstream with a
+		// genuine signature member even when the client offered no tools.
+		if got := strings.Join(names, ","); got != "glob,end_turn,decide" {
+			t.Fatalf("wire tools = %q, want glob,end_turn,decide", names)
 		}
 	})
 
-	t.Run("02 empty tools no injection", func(t *testing.T) {
+	t.Run("02 empty tools carries first-party pin", func(t *testing.T) {
 		wire, _ := matrixWire(t, matrixChatBody([]any{}, nil))
-		if names := matrixWireNames(t, wire); len(names) != 0 {
-			t.Fatalf("wire tools = %q, want empty (no injection on empty)", names)
+		names := matrixWireNames(t, wire)
+		assertWireSane(t, names)
+		if got := strings.Join(names, ","); got != "glob,end_turn,decide" {
+			t.Fatalf("wire tools = %q, want glob,end_turn,decide (injection runs on empty)", names)
 		}
 	})
 

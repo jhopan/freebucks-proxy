@@ -98,12 +98,12 @@ func TestIssue729LiveGateClear(t *testing.T) {
 	}
 }
 
-// Issue #630 bisection matrix under the LIVE gate: the trigger is still
-// tools-presence at the wire level (only the tools shape emits a tools
-// array), but EVERY shape reads CLEAR — the live verdict is
-// shape-independent, which is exactly why the 404 must come from the
-// routing/capability layer (OpenRouter "No endpoints found for <model>"),
-// not from any gate trip.
+// Issue #630 bisection matrix under the LIVE gate: EVERY shape now emits a
+// tools array (the first-party pin, glob + end_turn + decide) and every shape
+// reads CLEAR — the live cf-worker verdict is shape-independent, which is
+// exactly why a tools-presence refusal must come from the routing/capability
+// layer (OpenRouter "No endpoints found for <model>") or from the separate
+// server-side tool-schema check, not from any cf-worker gate trip.
 func TestIssue630MatrixLiveGateClear(t *testing.T) {
 	shapes := map[string]map[string]any{
 		"no-tools": {
@@ -132,11 +132,17 @@ func TestIssue630MatrixLiveGateClear(t *testing.T) {
 	for name, body := range shapes {
 		t.Run(name, func(t *testing.T) {
 			tools := wireToolsOf(t, body)
-			if name == "tools" && len(tools) != 4 { // fork: + genuine glob signature tool
-				t.Fatalf("tools shape emitted %d wire tools, want 4 (incl. genuine glob)", len(tools))
+			// Every shape carries the first-party pin (glob + end_turn +
+			// decide); the "tools" shape keeps the client's own tool on top.
+			// A bare wire is the third_party_client shape — see
+			// normalizeToolSchemas — so this matrix pins that NO shape is
+			// bare any more.
+			want := 3
+			if name == "tools" {
+				want = 4 // fork: + genuine glob signature tool
 			}
-			if name != "tools" && len(tools) != 0 {
-				t.Fatalf("%s emitted %d wire tools, want bare", name, len(tools))
+			if len(tools) != want {
+				t.Fatalf("%s emitted %d wire tools, want %d (first-party pin present)", name, len(tools), want)
 			}
 			if v := ProxyCfWorkerEgressVerdict(); v.Detected {
 				t.Errorf("%s live-gate verdict = %+v, want CLEAR", name, v)
