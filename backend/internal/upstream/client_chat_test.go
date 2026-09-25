@@ -983,7 +983,7 @@ func TestWaitingRoomChainWireFidelity(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		switch {
-		case r.URL.Path == "/api/v1/ads" && r.Method == http.MethodPost:
+		case r.URL.Path == "/api/ads" && r.Method == http.MethodPost:
 			adsHits++
 			adsHeaders = r.Header.Clone()
 			_ = json.NewDecoder(r.Body).Decode(&adsBody)
@@ -999,12 +999,13 @@ func TestWaitingRoomChainWireFidelity(t *testing.T) {
 		}
 	}))
 	defer ts.Close()
+	defer SetAdsBaseURLForTest(ts.URL)()
 
 	client, err := New("tok-a", testConfig(ts.URL, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	client.FireWaitingRoomChain(context.Background())
+	client.FireWaitingRoomChain(context.Background(), "")
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -1022,6 +1023,19 @@ func TestWaitingRoomChainWireFidelity(t *testing.T) {
 	// targeting) — must agree with the device block's os.
 	if got := adsBody["userAgent"]; got != adBrowserUserAgent() {
 		t.Errorf("ads body userAgent = %q, want %q", got, adBrowserUserAgent())
+	}
+	// Live-capture fields: capabilityInspection + placementIds. sessionId is
+	// omitted on a fresh waiting-room chain call (no run id yet) — the
+	// session-scoped id rides along only when the caller has one.
+	if _, ok := adsBody["sessionId"]; ok {
+		t.Error("ads body sessionId present, want omitted (fresh waiting-room)")
+	}
+	if ci, ok := adsBody["capabilityInspection"].(map[string]any); !ok || ci["status"] != "unavailable" {
+		t.Errorf("ads body capabilityInspection = %v, want {status:unavailable,...}", adsBody["capabilityInspection"])
+	}
+	pl, ok := adsBody["placementIds"].([]any)
+	if !ok || len(pl) == 0 || pl[0] != "waiting-room-1" {
+		t.Errorf("ads body placementIds = %v, want [waiting-room-1]", adsBody["placementIds"])
 	}
 	// Device block: host-derived IANA tz/locale, not hardcoded UTC/en-US.
 	device, ok := adsBody["device"].(map[string]any)

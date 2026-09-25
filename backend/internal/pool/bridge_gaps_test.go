@@ -51,7 +51,7 @@ func TestBridgeWaitingRoomChainFiresBeforeCreate(t *testing.T) {
 	var ads, streaks atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/v1/ads":
+		case "/api/ads":
 			ads.Add(1)
 			w.WriteHeader(200)
 			_, _ = io.WriteString(w, `{"ads":[]}`)
@@ -74,6 +74,7 @@ func TestBridgeWaitingRoomChainFiresBeforeCreate(t *testing.T) {
 			proxyToMock(w, r, mock)
 		}
 	}))
+	defer upstream.SetAdsBaseURLForTest(srv.URL)()
 	defer srv.Close()
 
 	// Build the pool manually (the bridge entry's upstream client is built

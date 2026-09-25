@@ -258,7 +258,7 @@ admitRetry:
 			// 428 again (mirrors the fixed-token path in acquire.go).
 			if cfg.WaitingRoomChain && entry.client.ConsumeWaitingRoomChain() {
 				p.logger.Debug("pool: bridge firing waiting-room pre-session chain", "token", bridgeTokenLabel(entry), "model", model)
-				entry.client.FireWaitingRoomChain(ctx)
+				entry.client.FireWaitingRoomChain(ctx, "")
 			}
 			sessionStart := time.Now()
 			_, serr := entry.session.EnsureSessionForModel(ctx, model)

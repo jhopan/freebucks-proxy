@@ -1,6 +1,7 @@
 package upstream
 
 import (
+	"bytes"
 	"context"
 	cryptoRand "crypto/rand"
 	"encoding/json"
@@ -88,28 +89,35 @@ const waitingRoomChainTimeout = 15 * time.Second
 // free-mode ad loop is a live-mode gate, but reviewers should scrutinize it:
 // dropping the click leg is the safe retreat if the server ever treats
 // gestureless clicks as abuse.
-func (c *Client) FireWaitingRoomChain(ctx context.Context) {
+func (c *Client) FireWaitingRoomChain(ctx context.Context, sessionID string) {
 	ctx, cancel := context.WithTimeout(ctx, waitingRoomChainTimeout)
 	defer cancel()
-	for _, provider := range waitingRoomAdProviders {
-		impURL, err := c.requestAds(ctx, provider)
-		if err != nil {
-			slog.Debug("waiting room chain: ads request failed", "provider", provider, "err", err)
-			continue
-		}
-		if impURL == "" {
-			continue
-		}
-		if err := c.postAdEvent(ctx, "/api/v1/ads/impression", impressionPayload(impURL)); err != nil {
-			slog.Debug("waiting room chain: ads impression failed", "provider", provider, "err", err)
-		}
-		if err := c.postAdEvent(ctx, "/api/v1/ads/click", clickPayload(impURL)); err != nil {
-			slog.Debug("waiting room chain: ads click failed", "provider", provider, "err", err)
-		}
+	// Fork 2026-09-25 (wire capture of the live CLI): the CLI fires exactly
+	// ONE POST /api/ads per waiting-room episode — to freebuff.com, with the
+	// session-scoped body — and sends NO impression/click legs (capture:
+	// docs/operations/bun-1.3.14-clienthello.txt companion log). The
+	// fabricated impression/click pair was a signal the CLI never sends.
+	// One auction per episode: the CLI fires gravity once and moves on (no
+	// second provider retry inside the same wait).
+	if _, err := c.requestAds(ctx, waitingRoomAdProviders[0], sessionID); err != nil {
+		slog.Debug("waiting room chain: ads request failed", "provider", waitingRoomAdProviders[0], "err", err)
 	}
 	if err := c.getStreak(ctx); err != nil {
 		slog.Debug("waiting room chain: streak request failed", "err", err)
 	}
+}
+
+// adsBaseURL is the ads origin — freebuff.com (the WEB origin), NOT the
+// API base www.codebuff.com. Captured from the live CLI (POST
+// https://freebuff.com/api/ads). Tests point it at the mock via
+// SetAdsBaseURLForTest.
+var adsBaseURL = "https://freebuff.com"
+
+// SetAdsBaseURLForTest repoints the ads origin (test-only).
+func SetAdsBaseURLForTest(u string) func() {
+	old := adsBaseURL
+	adsBaseURL = u
+	return func() { adsBaseURL = old }
 }
 
 // waitingRoomAdProviders mirrors the live CLI ad surfaces
@@ -126,7 +134,7 @@ var waitingRoomAdProviders = []string{"gravity", "carbon"}
 // On success it returns the first auctioned ad's server-issued impUrl ("" when
 // the auction answered with no ads), which the impression/click legs ack;
 // the impUrl is never invented locally.
-func (c *Client) requestAds(ctx context.Context, provider string) (string, error) {
+func (c *Client) requestAds(ctx context.Context, provider, sessionID string) (string, error) {
 	payload := map[string]any{
 		"provider": provider,
 		"messages": []any{},
@@ -135,17 +143,29 @@ func (c *Client) requestAds(ctx context.Context, provider string) (string, error
 			"timezone": egressDeviceTimezone(),
 			"locale":   egressDeviceLocale(),
 		},
-		// Body userAgent: the shared browser-like UA (NOT a runtime UA) so
-		// every ad provider sees a usable targeting signal — the CLI sends
-		// getAdUserAgent() here (#124).
 		"userAgent": adBrowserUserAgent(),
 		"surface":   "waiting_room",
+		// Live-capture fields (2026-09-25): the CLI carries a
+		// capabilityInspection block and the placementIds array. sessionId is
+		// added only when the caller has one (the live CLI captures showed a
+		// session-scoped id; a fresh waiting-room omits it).
+		"capabilityInspection": map[string]any{"status": "unavailable", "reason": "windows_no_containment"},
+		"placementIds":         []string{"waiting-room-1"},
+	}
+	if sessionID != "" {
+		payload["sessionId"] = sessionID
 	}
 	body, _ := json.Marshal(payload)
-	req, err := c.newRequest(ctx, http.MethodPost, "/api/v1/ads", body)
+	// The ads auction lives on freebuff.com (the WEB origin), NOT on the
+	// API base www.codebuff.com — captured from the live CLI
+	// (POST https://freebuff.com/api/ads). newRequest concatenates
+	// c.baseURL, so build the request directly against the ads origin.
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, adsBaseURL+"/api/ads", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.token)
 	// Header UA: Freebuff-CLI/<version> (getCliAdRequestUserAgent), NOT the
 	// chat ai-sdk UA newRequest set — the CLI's ads POST carries exactly
 	// this product UA (#124).

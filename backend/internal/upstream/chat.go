@@ -179,7 +179,7 @@ func (c *Client) ChatCompletions(ctx context.Context, opts ChatOptions, body []b
 					// flagged and banned on 2026-09-24/25. Fire the same
 					// best-effort chain once per queued chat so the wait
 					// looks like the CLI's wait.
-					go c.FireWaitingRoomChain(context.Background())
+					go c.FireWaitingRoomChain(context.Background(), opts.RunID)
 				} else {
 					c.capacityDeferredRetries.Add(1) // lifetime metric
 				}

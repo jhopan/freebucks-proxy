@@ -695,7 +695,7 @@ func (p *Pool) admitOnLane(ws *walkState, idx int, tok *tokenEntry, routeSlot *s
 	// so the admission does not bounce off the same 428 again.
 	if cfg.WaitingRoomChain && tok.client.ConsumeWaitingRoomChain() {
 		p.logger.Debug("pool: firing waiting-room pre-session chain", "token", idx+1, "model", model)
-		tok.client.FireWaitingRoomChain(ctx)
+		tok.client.FireWaitingRoomChain(ctx, "")
 	}
 	instanceID, err := tok.session.EnsureSessionForModel(ctx, model)
 	p.markPersistDirty()

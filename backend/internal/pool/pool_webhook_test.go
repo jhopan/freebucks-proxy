@@ -139,7 +139,7 @@ func newChainTracker(mock *testutil.MockUpstream) *chainTracker {
 	ct := &chainTracker{}
 	ct.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/v1/ads":
+		case "/api/ads":
 			ct.ads.Add(1)
 			w.WriteHeader(200)
 			_, _ = io.WriteString(w, `{"ads":[]}`)
@@ -188,6 +188,7 @@ func TestWaitingRoomChainFiresBeforeCreate(t *testing.T) {
 	defer mock.Close()
 	ct := newChainTracker(mock)
 	defer ct.srv.Close()
+	defer upstream.SetAdsBaseURLForTest(ct.srv.URL)()
 
 	// Build the pool manually (newTestPoolCfg pins the client to the mock,
 	// but the chain must be observable, so the client upstream is the
