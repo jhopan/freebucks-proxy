@@ -339,26 +339,28 @@ func TestTransientRetries(t *testing.T) {
 	t.Setenv("TRANSIENT_RETRIES", "")
 }
 
-// TestWaitingRoomRetries pins the separate waiting-room budget: default 4
-// (the CLI rides out an admission queue for minutes), explicit 0 surfaces the
-// 503 at once, and a negative value rejects the config.
+// TestWaitingRoomRetries pins the separate waiting-room budget: default 0
+// (the shipped clients surface a queued chat at once and ride the queue on the
+// session poll loop — see docs/operations/OFFICIAL-CLIENT-TEARDOWN.md), a
+// non-zero value re-enables the in-place chat retry as an escape hatch, and a
+// negative value rejects the config.
 func TestWaitingRoomRetries(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("AUTH_TOKENS", "tok-1")
 
-	// default: 4 (the vendor poll backoff makes ~2-5 minutes of waiting)
+	// default: 0 — the queued 503 is surfaced at once, like the shipped clients
 	if cfg, err := Load(""); err != nil {
 		t.Fatalf("Load (default): %v", err)
-	} else if cfg.WaitingRoomRetries != 4 {
-		t.Errorf("WaitingRoomRetries = %d, want 4 (default)", cfg.WaitingRoomRetries)
+	} else if cfg.WaitingRoomRetries != 0 {
+		t.Errorf("WaitingRoomRetries = %d, want 0 (default)", cfg.WaitingRoomRetries)
 	}
 
-	// explicit 0 surfaces the waiting room at once
-	t.Setenv("WAITING_ROOM_RETRIES", "0")
+	// a non-zero value re-enables the in-place chat retry (escape hatch)
+	t.Setenv("WAITING_ROOM_RETRIES", "4")
 	if cfg, err := Load(""); err != nil {
-		t.Fatalf("Load (0): %v", err)
-	} else if cfg.WaitingRoomRetries != 0 {
-		t.Errorf("WaitingRoomRetries = %d, want 0 (disabled)", cfg.WaitingRoomRetries)
+		t.Fatalf("Load (4): %v", err)
+	} else if cfg.WaitingRoomRetries != 4 {
+		t.Errorf("WaitingRoomRetries = %d, want 4 (escape hatch)", cfg.WaitingRoomRetries)
 	}
 	t.Setenv("WAITING_ROOM_RETRIES", "")
 

@@ -155,7 +155,7 @@ func defaultRawConfig() rawConfig {
 		RequestJitter:          "",    // "" = disabled (unset → SAFE_MODE preset may fill)
 		CLIVersion:             "0.10.7",
 		TransientRetries:       nil,  // nil = 1 (one retry after a transient transport failure; 0 disables)
-		WaitingRoomRetries:     nil,  // nil = 4 (waiting-room retries ride out an admission queue; 0 surfaces the 503 at once)
+		WaitingRoomRetries:     nil,  // nil = 0 (surface the queued 503 at once, matching the shipped clients; see OFFICIAL-CLIENT-TEARDOWN.md. Non-zero re-enables the in-place chat retry)
 		SessionPersist:         true, // session persistence on by default: restart resumes unexpired sessions
 		SessionStateFile:       ".freebuff-session-state.json",
 		HTTP2Upstream:          true,       // h2 ALPN matches real browsers (reference proxy-freebuff USE_HTTP2 default '1'); HTTP2_UPSTREAM=false forces h1 (#51)

@@ -44,6 +44,13 @@ func TestEnvExampleLoadsCleanly(t *testing.T) {
 	if cfg.TransientRetries != 1 {
 		t.Errorf("TransientRetries = %d, want 1", cfg.TransientRetries)
 	}
+	// The shipped .env.example sets WAITING_ROOM_RETRIES=0 explicitly: the
+	// queued 503 is surfaced at once, matching the shipped CLI and desktop
+	// (docs/operations/OFFICIAL-CLIENT-TEARDOWN.md). A fresh copy must not
+	// re-enable the in-place chat retry that no real client produces.
+	if cfg.WaitingRoomRetries != 0 {
+		t.Errorf("WaitingRoomRetries = %d, want 0 (queued 503 surfaced at once)", cfg.WaitingRoomRetries)
+	}
 	if !cfg.BridgeMode() {
 		t.Error("BridgeMode() = false, want true (empty AUTH_TOKENS)")
 	}

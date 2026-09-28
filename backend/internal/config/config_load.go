@@ -292,13 +292,21 @@ func LoadOpts(configPath string, opts LoadOptions) (Config, error) {
 		transientRetries = *raw.TransientRetries
 	}
 
-	// WAITING_ROOM_RETRIES: nil defaults to 4. The waiting room is an
-	// admission queue, not a transient blip: the CLI keeps its session retry
-	// loop running at 20s doubling to a 5m cap, so one attempt (the
-	// TRANSIENT_RETRIES default) surfaced a 503 the CLI would have waited
-	// out. Four attempts on that backoff ride out roughly 2-5 minutes; an
-	// explicit 0 surfaces the 503 immediately.
-	waitingRoomRetries := 4
+	// WAITING_ROOM_RETRIES: nil defaults to 0 — surface the queued 503 at once.
+	//
+	// A static teardown of the shipped clients (docs/operations/
+	// OFFICIAL-CLIENT-TEARDOWN.md) settled what the old default got wrong. The
+	// vendor 20s-doubling / 5m-cap backoff (cli/src/utils/polling-backoff.ts
+	// failedPollDelayMs) is the backoff of the SESSION endpoint: it is wired in
+	// use-freebuff-session.ts and drives GET/POST /api/v1/freebuff/session,
+	// never a chat completion. Neither shipped client re-POSTs the chat while
+	// queued — the CLI surfaces the turn and keeps polling the session, and the
+	// desktop's AI SDK stops at maxRetries=2 (with x-should-retry able to veto).
+	// Re-POSTing the chat on that backoff was a queue-hammering shape no real
+	// client produces. The queue is ridden out by the session poll loop
+	// (sessionPollBackoffBase/Max), which already carries the vendor shape.
+	// A non-zero value re-enables the in-place chat retry as an escape hatch.
+	waitingRoomRetries := 0
 	if raw.WaitingRoomRetries != nil {
 		waitingRoomRetries = *raw.WaitingRoomRetries
 	}

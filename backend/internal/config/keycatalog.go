@@ -375,8 +375,8 @@ var keyCatalog = []KeyDef{
 	},
 	{
 		Key: "WAITING_ROOM_RETRIES", Group: GroupUpstream, Kind: "int", RestartOnly: true, Hidden: true,
-		Default:     "4",
-		Description: `Max in-place retries when the upstream waiting room queues a chat (any 503, or the 429 waiting_room_queued race). Separate from TRANSIENT_RETRIES because the CLI rides out a queue for minutes: retries use the vendor poll backoff (20s doubling, 5m cap, jittered, Retry-After honored), so 4 attempts cover roughly 2-5 minutes before the 503 is surfaced (0 = surface at once).`,
+		Default:     "0",
+		Description: `Max in-place retries when the upstream waiting room queues a chat (any 503, or the 429 waiting_room_queued race). Default 0 surfaces the queue at once, matching the shipped clients: a static teardown (docs/operations/OFFICIAL-CLIENT-TEARDOWN.md) found the 20s-doubling / 5m vendor backoff belongs to the SESSION endpoint (cli/src/utils/polling-backoff.ts failedPollDelayMs drives GET/POST /api/v1/freebuff/session), and neither client re-POSTs a chat while queued — the CLI surfaces the turn and rides the queue on its session poll loop, the desktop AI SDK stops at maxRetries=2. A non-zero value re-enables the in-place chat retry (20s doubling, 5m cap, jittered, Retry-After honored) as an escape hatch.`,
 	},
 
 	// ── security ─────────────────────────────────────────────────────────

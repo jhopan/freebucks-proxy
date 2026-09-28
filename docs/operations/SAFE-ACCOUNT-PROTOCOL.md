@@ -159,14 +159,44 @@ together, and the two branches have different surface enums.
 
 ## 6. Waiting room is not a ban
 
-Do not confuse the two — they need opposite responses:
+Do not confuse the two — they need opposite responses. The shipped clients
+classify these by the body's `error` field **and** the status code together
+(`FREEBUFF_GATE_CODES` in `orchestrator.js`: a code only counts when both match):
 
-| Symptom | Meaning | Action |
-| --- | --- | --- |
-| `503` + growing `Retry-After` | Capacity queue. Account **healthy**. | Wait. The gateway backs off on the vendor's poll shape (20s doubling to 5m). |
-| `429 ip_capped` | Too many distinct users on this egress IP. | Wait for another to end; not a quota reset. |
-| `403 {"status":"banned"}` | **Terminal.** | New account. |
-| `403 free_mode_unavailable` | Country / IP-privacy gate. | Change egress. |
+| Signal | Status | Session | Action |
+| --- | --- | --- | --- |
+| `waiting_room_required` | **428** | **ends** (`endsTheSession: true`) | Re-admit once — that is a **new charge**. |
+| `waiting_room_queued` | **429** | survives | Surface it; ride the queue on the session poll loop. |
+| `free_mode_capacity_deferred` | **429** | survives | Auto-retry, honouring `retry-after` (10 s default). |
+| `model_unavailable` | **410** | survives | Not a queue — the model is unavailable. |
+| `session_expired` | **410** | **ends** | Re-admit once. |
+| `429 ip_capped` | 429 | n/a | Too many distinct users on this egress IP. Wait; not a quota reset. |
+| `403 {"status":"banned"}` | 403 | **terminal** | New account. |
+| `403 free_mode_unavailable` | 403 | n/a | Country / IP-privacy gate. Change egress. |
+
+The gateway's own `503` is its **outbound** surface for the queued cases
+(`WaitingRoomError` covers any upstream 503 and the 429 `waiting_room_queued`
+race) — it is not necessarily what upstream sent.
+
+### 6a. Never re-POST the chat while queued
+
+The vendor 20s-doubling / 5m-cap backoff
+(`cli/src/utils/polling-backoff.ts` `failedPollDelayMs`) belongs to the **session
+endpoint**: it is wired in `cli/src/hooks/use-freebuff-session.ts` against
+`GET/POST /api/v1/freebuff/session`, never a chat completion. Neither shipped
+client re-POSTs a chat while queued — the CLI surfaces the turn and keeps polling
+the session, and the desktop's AI SDK stops at `maxRetries = 2` (with
+`x-should-retry` able to veto).
+
+`WAITING_ROOM_RETRIES` therefore defaults to **0**: the queued 503 is surfaced at
+once and the queue is ridden out by the session poll loop, which already carries
+that backoff. Re-POSTing the chat repeatedly is a queue-hammering shape no real
+client produces — exactly the "third-party client" signal this protocol exists to
+avoid. Only set a non-zero value as a deliberate escape hatch.
+
+Contrast with `free_mode_capacity_deferred`, which the shipped clients **do**
+auto-retry (the AI SDK absorbs it in ~2 attempts, honouring `retry-after` with a
+10 s default) — that path is unchanged.
 
 ## 7. Budget mechanics
 

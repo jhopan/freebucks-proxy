@@ -55,11 +55,13 @@ type Client struct {
 	transientRetriesLimit int
 
 	// waitingRoomRetriesLimit is WAITING_ROOM_RETRIES: the separate,
-	// per-request budget for in-place waiting-room retries. It is its own
-	// knob (not TRANSIENT_RETRIES) because the waiting room is an admission
-	// queue the CLI rides out for minutes, while a capacity deferral is a
-	// transient blip the AI SDK absorbs in ~2 attempts. The two budgets are
-	// independent so neither can starve the other.
+	// per-request budget for in-place waiting-room retries. Defaults to 0 —
+	// the queued 503 is surfaced at once, matching the shipped clients, whose
+	// queue wait happens on the SESSION endpoint's poll loop rather than by
+	// re-POSTing a chat (docs/operations/OFFICIAL-CLIENT-TEARDOWN.md). Kept as
+	// its own knob (not TRANSIENT_RETRIES) so a non-zero escape-hatch value
+	// cannot starve the capacity-deferral budget, which the AI SDK does absorb
+	// in ~2 attempts.
 	waitingRoomRetriesLimit int
 
 	// capacityDeferredRetries counts free_mode_capacity_deferred retries
