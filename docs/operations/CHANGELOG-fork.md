@@ -1170,3 +1170,141 @@ mengisi `AUTH_TOKENS` dari login CLI nyata saat pertama dijalankan).
 
 Verifikasi: `gofmt` bersih, `go build ./...` OK, `go vet ./...` bersih,
 `go test ./...` hijau seluruh paket (termasuk e2e dan `archtest`).
+
+## 2026-09-28 — teardown klien resmi: waiting room TIDAK boleh di-retry lewat chat
+
+### Cara temuan ini didapat
+
+Teardown statis aplikasi yang terpasang di mesin ini (tidak menjalankan aplikasi,
+tidak memanggil upstream): desktop Electron di
+`%LOCALAPPDATA%\Programs\@codebufffreebuff-desktop` dan CLI
+`~/.config/manicode/freebuff.exe` (0.0.196). Laporan lengkap:
+`docs/operations/OFFICIAL-CLIENT-TEARDOWN.md`.
+
+**Logika desktop ada di `resources/orchestrator/orchestrator.js` (8,1 MB), BUKAN di
+`app.asar`** — scan asar untuk `waiting_room`/`waitingRoom`/`waiting room` = 0 hit.
+Ini jebakan pertama: siapa pun yang men-scan asar untuk fitur apa pun akan nihil.
+
+### Cacat yang ditemukan: `WAITING_ROOM_RETRIES` default 4 me-re-POST chat
+
+Default lama (`4`) me-re-POST **chat completion** saat upstream mengantre, memakai
+`waitingRoomBackoff` — 20 s berlipat, cap 5 m, jitter paruh bawah. Bentuk backoff itu
+diambil dari `cli/src/utils/polling-backoff.ts` `failedPollDelayMs`.
+
+Masalahnya: **backoff itu milik endpoint SESI, bukan jalur chat.** Bukti:
+
+- `failedPollDelayMs` di-wire di `cli/src/hooks/use-freebuff-session.ts:882-892`
+  lewat `classifyFreebuffSessionRequestFailure(method: 'POST'|'GET', err)` — yaitu
+  endpoint `/api/v1/freebuff/session`.
+- Desktop: chat POST di-retry AI SDK dengan `maxRetries = 2`, dan `shouldRetry`
+  mengembalikan true untuk 408/409/429/≥500 (bisa diveto header `x-should-retry`).
+  Delay-nya dari `retry-after`/`retry-after-ms`, dan hanya dihormati bila `< 60 s`.
+- Jadi **tidak ada klien resmi yang me-re-POST chat berkali-kali dengan bentuk poll
+  20 s→5 m saat ter-queue.** CLI menyerahkan turn-nya dan menunggui antrean di loop
+  poll sesi; desktop berhenti di 2 percobaan.
+
+Komentar lama di `chat.go` bahkan menyebut alasan yang tepat ("bentuk yang loop sesi
+CLI jalankan") lalu menerapkannya ke request yang salah. Chat completion adalah request
+yang di-score gate; me-re-POST-nya berulang saat akun ter-queue menghasilkan bentuk
+yang tidak pernah dibuat klien asli → sinyal "third-party client" terakumulasi.
+
+### Perubahan
+
+- **`WAITING_ROOM_RETRIES` default 4 → 0.** 503 yang ter-queue diserahkan segera,
+  seperti klien resmi. Knob tetap ada sebagai escape hatch: nilai non-nol
+  mengaktifkan kembali retry in-place di jalur chat. Titik yang diubah:
+  `config_keys.go` (default mentah), `config_load.go` (nilai efektif + alasan),
+  `keycatalog.go` (Default + Description).
+- **Komentar diperbaiki** di `upstream/chat.go` (`waitingRoomBackoff` + cabang retry)
+  dan `upstream/client.go` (`waitingRoomRetriesLimit`) supaya mencatat bahwa bentuk
+  20 s→5 m adalah pacing endpoint sesi.
+- **`TRANSIENT_RETRIES` TIDAK diubah** (default 1). Jalur `free_mode_capacity_deferred`
+  memang di-auto-retry klien resmi: AI SDK menyerapnya dalam ~2 percobaan dengan floor
+  10 s, dan default 1 (satu retry = 2 percobaan) sudah sepadan.
+- `.env.example`, `.env.full-example`, `docs/operations/pool-tuning.md` diperbarui.
+- Fixture `frontend/e2e/fixtures{,-realworld}/config-meta.json` di-regenerate
+  (`FP_REGEN_FIXTURE=1`) + prettier (wajib cwd `frontend/`).
+
+### Test
+
+- `TestWaitingRoomRetries` sekarang mengunci default **0**, plus kasus nilai non-nol
+  sebagai escape hatch dan kasus negatif yang ditolak.
+- `TestEnvExampleLoadsCleanly` menambah assertion `WaitingRoomRetries == 0` untuk
+  `.env.example` (salinan baru tidak boleh mengaktifkan ulang retry chat).
+- Test yang memang menguji perilaku retry (`server_chat_waitingroom_test.go`,
+  `client_waitingroom_test.go`) sudah menyetel knob eksplisit, jadi tidak berubah.
+
+Verifikasi: `gofmt` bersih, `go vet` bersih, `go test ./backend/...` hijau
+(termasuk `TestConfigMetaFixtureParity` dan `TestCatalogOrdered`).
+
+### Sisa / belum
+
+- Konfigurasi produksi (VPS `vps-natusa`) belum disentuh di commit ini; nilai
+  efektifnya perlu diperiksa karena overlay DB bisa memuat `config:WAITING_ROOM_RETRIES`.
+- 428 `waiting_room_required` masih memicu admission ulang (sesuai kontrak vendor:
+  `endsTheSession: true`), tetapi jumlah re-admission per turn belum dibandingkan
+  satu-per-satu dengan desktop (yang melakukannya sekali per turn).
+
+## 2026-09-28 (2) — prompt init: yang dijaga bukan "init prompt", plus dua cacat cap identitas
+
+Dipicu pertanyaan "katanya errornya di init prompt, harus mirip CLI freebuff".
+Teardown statis klien resmi (lihat `OFFICIAL-CLIENT-TEARDOWN.md` §12) membatalkan
+premisnya, lalu menemukan dua cacat nyata di jalur cap identitas proxy.
+
+### Temuan
+
+- **`foreign_system_prompt` sudah dihapus upstream.** `foreign-client-signals.ts`
+  tidak ada lagi di tree vendor HEAD (dihapus di `0ae8779d2`, 0.0.189+, setelah
+  pembalikan ban false-positive 659 akun). Gate yang hidup adalah deteksi CF-Worker
+  (`cf-worker-signals.ts`), yang membaca header yang dicap edge dan **tidak pernah**
+  membaca system prompt maupun `tools[]`. Jadi 403 tidak bisa datang dari "init
+  prompt" lewat jalur itu.
+- **Tidak ada konsep "init prompt".** `initPrompt` di desktop adalah isi slash command
+  `/init` (menyuruh model menulis `knowledge.md`); `initialPrompt` adalah nama internal
+  Vercel AI SDK; dan di CLI resmi `initialPrompt` **selalu `null`** (positional
+  `[prompt...]` dihapus dari build upstream).
+- **Yang benar-benar dijaga: canonical opening di byte 0.**
+  `FREEBUFF_ROOT_SYSTEM_PROMPT_OPENINGS` (5 kalimat) + `hasFreebuffRootSystemPromptOpening`
+  = trimmed byte-exact prefix test. Masih hidup; dikonfirmasi di tiga tempat kode
+  produksi vendor (`agents/base3.ts:82-83`, `cli/src/utils/sponsored-agent.ts:41-43`,
+  plus drift-guard `free-agents.test.ts`).
+- **Cap proxy sudah benar di intinya.** `cliSystemMarker` **byte-identik** dengan
+  prompt base2 free mode yang dikirim `freebuff.exe` terpasang (varian `Freebuff`,
+  21× di binary vs 10× varian Codebuff).
+
+### Cacat yang diperbaiki
+
+1. `cliSystemGateOpenings[0]` kehilangan titik penutup dibanding string vendor
+   (`…coding assistant` vs `…coding assistant.`). Karena gate-nya prefix test, entri
+   yang lebih pendek **melebarkan** `hasCanonicalOpening`: prompt yang membuka
+   `…coding assistant` lalu apa pun selain titik dianggap sudah canonical, prepend
+   dilewati, dan request berangkat tanpa cap → 403.
+2. `systemMarkerFor` memakai `HasPrefix(agentID, "base3")`, sementara ID root base3
+   desktop adalah **suffix**: `getFreebuffDesktopThreadAgentId` menambahkan
+   `FREEBUFF_DESKTOP_THREAD_V3_SUFFIX` (`'v3'`) → `freebuff-desktop-thread-local-v3`.
+   Run desktop base3 ditandai identitas base2, sehingga model membaca dua pembuka
+   "You are Buffy" yang bertentangan dalam satu pesan system — bentuk yang tidak
+   pernah dikirim klien mana pun. Diperbaiki mengikuti keluarga root vendor; komentar
+   mencatat eksplisit bahwa cabang desktop belum terjangkau lewat parser registry
+   hari ini (perbaikan predikat, bukan perbaikan 403 aktif).
+
+### File
+
+- `backend/internal/upstream/chat.go` — `cliSystemMarkerPhrase` jadi verbatim (titik
+  disertakan), tambah `cliSystemMarkerDesktopAutorun`, `systemMarkerFor` jadi switch
+  per keluarga root, komentar `cliSystemGateOpenings` diperbarui.
+- `backend/internal/upstream/client_chat_test.go` — `TestCliSystemGateOpeningsMatchVendor`
+  (pin lima string vendor verbatim), `TestCanonicalOpeningRejectsNearMiss`,
+  `TestSystemMarkerForRootFamilies`.
+- `docs/operations/OFFICIAL-CLIENT-TEARDOWN.md` — §12 baru (12a–12f).
+
+Verifikasi: `gofmt` bersih, `go vet ./backend/internal/upstream/` bersih,
+`go test ./backend/internal/upstream/` hijau (21.6 s).
+
+### Sisa / belum
+
+- Referensi baris vendor di `chat.go` masih menyebut `free-agents.ts:693-722` (revisi
+  pin); di HEAD `0065263` array-nya di `1009-1038`. Perbarui saat re-pin vendor.
+- Cabang desktop di `systemMarkerFor` belum punya jalur hidup; kalau parser registry
+  mulai me-resolve computed key `FREE_MODE_AGENT_MODELS`, tambahkan test yang membuktikan
+  ID-nya benar-benar sampai ke `ChatOptions.AgentID`.
