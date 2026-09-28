@@ -587,6 +587,90 @@ func TestEnsureCliSystemMarkerBranches(t *testing.T) {
 	})
 }
 
+// vendorRootSystemPromptOpenings is FREEBUFF_ROOT_SYSTEM_PROMPT_OPENINGS
+// (pinned free-agents.ts:693-722) copied verbatim and in order. The free-mode
+// gate is a byte-exact prefix test, so this list — not a paraphrase of it — is
+// what cliSystemGateOpenings must equal.
+var vendorRootSystemPromptOpenings = []string{
+	"You are Buffy, the strategic coding assistant.",
+	"You are Buffy, the coding agent behind Codebuff.",
+	"You are Buffy, the Freebuff Cloud project planner.",
+	"You are Buffy, the auto-run agent behind Freebuff Desktop.",
+	"You are Buffy, a strategic assistant that orchestrates complex coding tasks through specialized sub-agents.",
+}
+
+// TestCliSystemGateOpeningsMatchVendor pins the mirror against the vendor array
+// byte for byte. A shorter entry is not merely cosmetic: hasCanonicalOpening
+// reads it as a prefix, so a period-less opening #1 accepted
+// "…strategic coding assistant<not-a-period>" as canonical, suppressed the
+// prepend, and let the request leave unstamped — a 403 the marker exists to
+// prevent. A wording edit upstream must update BOTH sides together.
+func TestCliSystemGateOpeningsMatchVendor(t *testing.T) {
+	if len(cliSystemGateOpenings) != len(vendorRootSystemPromptOpenings) {
+		t.Fatalf("openings = %d, want %d", len(cliSystemGateOpenings), len(vendorRootSystemPromptOpenings))
+	}
+	for i, want := range vendorRootSystemPromptOpenings {
+		if got := cliSystemGateOpenings[i]; got != want {
+			t.Errorf("opening #%d = %q, want %q", i+1, got, want)
+		}
+	}
+	// The marker constants themselves must clear the gate they feed: a typo in
+	// any of them would stamp a request with an identity upstream rejects.
+	for _, marker := range []string{cliSystemMarker, cliSystemMarkerBase3, cliSystemMarkerDesktopAutorun} {
+		if !hasCanonicalOpening(marker) {
+			t.Errorf("marker %q does not pass hasCanonicalOpening", marker)
+		}
+	}
+}
+
+// TestCanonicalOpeningRejectsNearMiss pins the exact shape the period guards: a
+// system prompt opening "…strategic coding assistant" followed by anything but
+// the period is NOT canonical upstream, so the marker must still be prepended.
+func TestCanonicalOpeningRejectsNearMiss(t *testing.T) {
+	nearMiss := "You are Buffy, the strategic coding assistant\n\nCustom persona."
+	if hasCanonicalOpening(nearMiss) {
+		t.Fatalf("near-miss accepted as canonical: %q", nearMiss)
+	}
+	p := map[string]any{"messages": []any{
+		map[string]any{"role": "system", "content": nearMiss},
+		map[string]any{"role": "user", "content": "u"},
+	}}
+	ensureCliSystemMarker(p, "base2-free")
+	got := p["messages"].([]any)[0].(map[string]any)["content"].(string)
+	if !strings.HasPrefix(got, cliSystemMarker+"\n\n") {
+		t.Errorf("marker not prepended to the near-miss: %q", got)
+	}
+}
+
+// TestSystemMarkerForRootFamilies covers the family→identity map against
+// FREEBUFF_ROOT_AGENT_IDS. The Desktop thread roots are the case a bare `base3`
+// prefix test got wrong: getFreebuffDesktopThreadAgentId appends
+// FREEBUFF_DESKTOP_THREAD_V3_SUFFIX ('v3') for the base3 generation, so the
+// family is a prefix while the generation is a suffix. Unsuffixed ids are the
+// original base2-generation roots Desktop shipped.
+func TestSystemMarkerForRootFamilies(t *testing.T) {
+	cases := []struct{ agent, want string }{
+		{"base2-free", cliSystemMarker},
+		{"base2-free-luna", cliSystemMarker},
+		{"base2-free-deepseek-flash", cliSystemMarker},
+		{"", cliSystemMarker},
+		{"basher", cliSystemMarker},
+		{"base3-free-luna", cliSystemMarkerBase3},
+		{"base3-free-deepseek-flash", cliSystemMarkerBase3},
+		{"freebuff-desktop-thread", cliSystemMarker},
+		{"freebuff-desktop-thread-local", cliSystemMarker},
+		{"freebuff-desktop-thread-worktree", cliSystemMarker},
+		{"freebuff-desktop-thread-local-v3", cliSystemMarkerBase3},
+		{"freebuff-desktop-thread-worktree-v3", cliSystemMarkerBase3},
+		{"freebuff-desktop-autorun", cliSystemMarkerDesktopAutorun},
+	}
+	for _, tc := range cases {
+		if got := systemMarkerFor(tc.agent); got != tc.want {
+			t.Errorf("systemMarkerFor(%q) = %q, want %q", tc.agent, got, tc.want)
+		}
+	}
+}
+
 // TestInjectEnvelopeBranchMatrix covers injectEnvelope's override behavior:
 // stream:false is force-overridden, provider is replaced, stop is
 // preserved, and a non-object body is rejected.

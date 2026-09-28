@@ -212,13 +212,13 @@ func (c *Client) ChatCompletions(ctx context.Context, opts ChatOptions, body []b
 				// the parsed retry-after (floor 10s) so the same-session retry
 				// does not re-POST immediately (amplification); ctx
 				// cancellation aborts the sleep like every other upstream wait.
-				// The waiting room does NOT use that flat floor: it uses the
-				// vendor's POLL backoff (20s doubling to a 5m cap, jittered
-				// over the lower half, never before the server's Retry-After)
-				// — the shape the CLI's own session loop keeps running while
-				// it is queued (cli/src/utils/polling-backoff.ts
-				// failedPollDelayMs). Re-POSTing the same queue every 10s is
-				// amplification and a shape the CLI never produces.
+				// The waiting room uses the vendor's POLL backoff instead (20s
+				// doubling to a 5m cap, jittered over the lower half, never
+				// before the server's Retry-After). NOTE: that backoff is the
+				// SESSION endpoint's pacing, not the chat path's — see the
+				// waitingRoomBackoff doc. This branch is reachable only when
+				// WAITING_ROOM_RETRIES is set non-zero; the default 0 surfaces
+				// the queued 503 at once, as the shipped clients do.
 				parsed := queueRetryAfter(cerr)
 				ra := 10 * time.Second
 				if parsed > 0 {
@@ -252,8 +252,16 @@ func (c *Client) ChatCompletions(ctx context.Context, opts ChatOptions, body []b
 
 // waitingRoomBackoffBase / waitingRoomBackoffMax mirror the vendor's failed
 // poll pacing (cli/src/utils/polling-backoff.ts failedPollDelayMs): 20s
-// doubling per consecutive failure, capped at 5m. The session poll loop and
-// the pool lifecycle carry the same twin; this is the chat-path one.
+// doubling per consecutive failure, capped at 5m.
+//
+// The session poll loop and the pool lifecycle carry the same twin — and that
+// is exactly where this shape belongs. failedPollDelayMs is wired in
+// cli/src/hooks/use-freebuff-session.ts against the SESSION endpoint
+// (classifyFreebuffSessionRequestFailure takes only the 'POST'|'GET' of
+// /api/v1/freebuff/session), never a chat completion. This chat-path twin is
+// therefore the fork's own invention: it runs only when WAITING_ROOM_RETRIES
+// is set non-zero, which is no longer the default (see
+// docs/operations/OFFICIAL-CLIENT-TEARDOWN.md).
 const (
 	waitingRoomBackoffBase = 20 * time.Second
 	waitingRoomBackoffMax  = 5 * time.Minute
@@ -320,29 +328,52 @@ func queueRand() uint64 {
 
 const (
 	// cliSystemMarker is the base2 root identity prepended at position 0 of
-	// the first system message. Its leading sentence is canonical opening #1
-	// of FREEBUFF_ROOT_SYSTEM_PROMPT_OPENINGS (pinned free-agents.ts:693-722,
-	// agents/base2/base2.ts createBase2('free', …)).
-	cliSystemMarker       = "You are Buffy, the strategic coding assistant. You are the AI agent behind the product, Freebuff, a tool where users can chat with you to code with AI for free."
-	cliSystemMarkerPhrase = "You are Buffy, the strategic coding assistant"
+	// the first system message. It is byte-identical to the shipped free-mode
+	// base2 prompt: agents/base2/base2.ts:258 createBase2('free', …) selects the
+	// `isFreebuff` arm — 'Freebuff' … 'code with AI for free.' — and the
+	// installed freebuff.exe carries that variant 21 times against 10 of the
+	// Codebuff one. Its leading sentence is canonical opening #1 of
+	// FREEBUFF_ROOT_SYSTEM_PROMPT_OPENINGS (pinned free-agents.ts:693-722).
+	cliSystemMarker = "You are Buffy, the strategic coding assistant. You are the AI agent behind the product, Freebuff, a tool where users can chat with you to code with AI for free."
+	// cliSystemMarkerPhrase is opening #1 VERBATIM, trailing period included.
+	// The period is load-bearing: the gate is a byte-exact prefix test, so a
+	// caller whose system prompt opens "…strategic coding assistant" and then
+	// anything but a period is NOT canonical upstream. Matching the phrase
+	// without it made hasCanonicalOpening call that near-miss canonical, skip
+	// the prepend, and let the request leave unstamped — the 403 this marker
+	// exists to prevent.
+	cliSystemMarkerPhrase = "You are Buffy, the strategic coding assistant."
 	// cliSystemMarkerBase3 is canonical opening #2 (agents/base3.ts
 	// createBase3(…)): every base3-free-* Web/Cloud/CLI root composes its
-	// prompt onto this sentence. PR #207 routes Luna (and vendor cce4800 Ox
-	// Alpha) onto base3 roots, so runs on those agents must open with THEIR
-	// canonical identity, not base2's.
+	// prompt onto this sentence, and so does Freebuff Desktop's thread agent —
+	// the shipped orchestrator.js carries base3's prompt verbatim, toolNames
+	// and all. PR #207 routes Luna (and vendor cce4800 Ox Alpha) onto base3
+	// roots, so runs on those agents must open with THEIR canonical identity,
+	// not base2's.
 	cliSystemMarkerBase3 = "You are Buffy, the coding agent behind Codebuff."
+	// cliSystemMarkerDesktopAutorun is canonical opening #4 — Freebuff
+	// Desktop's auto-run decider (freebuff-desktop services/mission.ts, shipped
+	// in orchestrator.js as renderMissionCatalogPrompt/renderMissionWriterPrompt).
+	// It is its own opening rather than base3's because that prompt tells the
+	// model it is the coding agent and this one spends its length establishing
+	// the opposite ("you never edit files or run commands").
+	cliSystemMarkerDesktopAutorun = "You are Buffy, the auto-run agent behind Freebuff Desktop."
 )
 
 // cliSystemGateOpenings mirrors FREEBUFF_ROOT_SYSTEM_PROMPT_OPENINGS (pinned
-// free-agents.ts:693-722): the free-mode gate is an any-of-five trimmed
-// PREFIX test at position 0 (hasFreebuffRootSystemPromptOpening), so a request
-// that already opens with ANY canonical identity must be left untouched —
-// prepending would corrupt a prompt that already passes the gate.
+// free-agents.ts:693-722) entry for entry: the free-mode gate is an any-of-five
+// trimmed PREFIX test at position 0 (hasFreebuffRootSystemPromptOpening), so a
+// request that already opens with ANY canonical identity must be left
+// untouched — prepending would corrupt a prompt that already passes the gate.
+// These are the vendor strings verbatim, not prefix-compatible paraphrases: a
+// shorter entry here silently widens hasCanonicalOpening past what upstream
+// accepts, so the request leaves unstamped and 403s. Pinned by
+// TestCliSystemGateOpeningsMatchVendor — update BOTH sides together.
 var cliSystemGateOpenings = []string{
 	cliSystemMarkerPhrase,
-	"You are Buffy, the coding agent behind Codebuff.",
+	cliSystemMarkerBase3,
 	"You are Buffy, the Freebuff Cloud project planner.",
-	"You are Buffy, the auto-run agent behind Freebuff Desktop.",
+	cliSystemMarkerDesktopAutorun,
 	"You are Buffy, a strategic assistant that orchestrates complex coding tasks through specialized sub-agents.",
 }
 
@@ -408,12 +439,41 @@ func sanitizeSystemMessageContent(content any) any {
 }
 
 // systemMarkerFor picks the canonical identity matching the run's root agent
-// family: base3 roots speak base3, everything else keeps the base2 marker.
+// family, mirroring FREEBUFF_ROOT_AGENT_IDS (free-agents.ts): `base3-free-*`
+// speak base3's opening, the Freebuff Desktop auto-run decider speaks opening
+// #4, everything else keeps the base2 marker.
+//
+// The Desktop thread roots are the case a bare `base3` prefix test got wrong,
+// and the reason they are not prefix-testable: getFreebuffDesktopThreadAgentId
+// builds `freebuff-desktop-thread-<local|worktree>` and appends
+// FREEBUFF_DESKTOP_THREAD_V3_SUFFIX ('v3') for the base3 single-loop harness,
+// so the FAMILY is a prefix while the GENERATION is a suffix. The unsuffixed
+// ids are the roots Desktop originally shipped (base2 generation) and stay
+// accepted for older clients; only the `-v3` ids are base3. Reading the family
+// as one generation stamped base2's identity onto a base3 run, leaving the
+// model to read two conflicting "You are Buffy" openings inside one system
+// message — a shape no shipped client produces.
+//
+// The Desktop branches are unreachable through today's registry: the parser
+// (registry/parse.go) reads only FREEBUFF_ROOT_AGENT_ID_BY_MODEL plus the
+// QUOTED keys of FREE_MODE_AGENT_MODELS, and the Desktop ids are computed keys
+// there (`[getFreebuffDesktopThreadAgentId('local', 'base3')]: …`). They are
+// spelled out so the predicate stays correct if the parser ever resolves them,
+// rather than silently regressing to base2.
 func systemMarkerFor(agentID string) string {
-	if strings.HasPrefix(agentID, "base3") {
+	switch {
+	case strings.HasPrefix(agentID, "base3"):
 		return cliSystemMarkerBase3
+	case strings.HasPrefix(agentID, "freebuff-desktop-thread"):
+		if strings.HasSuffix(agentID, "-v3") {
+			return cliSystemMarkerBase3
+		}
+		return cliSystemMarker
+	case agentID == "freebuff-desktop-autorun":
+		return cliSystemMarkerDesktopAutorun
+	default:
+		return cliSystemMarker
 	}
-	return cliSystemMarker
 }
 
 // hasCanonicalOpening reports whether content already begins with one of the
