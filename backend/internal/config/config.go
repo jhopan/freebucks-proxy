@@ -18,6 +18,20 @@ import (
 	"time"
 )
 
+// SYSTEM_PROMPT_MODE values (see Config.SystemPromptMode and
+// upstream/system_prompt.go).
+const (
+	// SystemPromptModeMarker is the historical behaviour: prepend the
+	// canonical "You are Buffy…" opening when the run's system message does
+	// not already start with one, leaving the caller's own prompt in place.
+	SystemPromptModeMarker = "marker"
+	// SystemPromptModeReplace (default) drops the run's system messages and
+	// installs the pinned free-mode base2 prompt, so the wire carries the
+	// prompt the shipped client actually sends. Destructive to third-party
+	// clients: their own system instructions are discarded.
+	SystemPromptModeReplace = "replace"
+)
+
 // Config is the fully-resolved, validated runtime configuration.
 type Config struct {
 	ListenAddr            string
@@ -257,6 +271,17 @@ type Config struct {
 	// message content for clients that do not render a reasoning channel
 	// (REASONING_IN_CONTENT; default "" = off). See CompressPrompt.
 	ReasoningInContent string
+	// SystemPromptMode is SYSTEM_PROMPT_MODE (config.SystemPromptModeMarker /
+	// SystemPromptModeReplace; default replace): how the upstream envelope
+	// treats the run's system message. "replace" drops the caller's system
+	// messages and installs the pinned free-mode base2 prompt the shipped
+	// client sends (upstream/system_prompt.go); "marker" only prepends the
+	// canonical opening sentence. Replace is destructive to third-party
+	// clients — their own system prompt is discarded while the pinned text
+	// tells the model to use spawn_agents — and it buys no detection signal:
+	// upstream's only live system-prompt check is the byte-0 opening test.
+	// Snapshotted into the upstream clients at boot (restart-only).
+	SystemPromptMode string
 	// SlotsPerAccount caps concurrent live turns per pooled account-model
 	// lane (SLOTS_PER_ACCOUNT; default 3): a token leases a new turn for a
 	// model only while fewer than this many are live on that account for

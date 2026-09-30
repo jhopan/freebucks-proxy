@@ -48,6 +48,7 @@ var dotenvKeys = map[string]bool{
 	"MATURITY_ENABLED": true, "MATURITY_TARGET_DAYS": true, "MATURITY_TOUCH_MODEL": true,
 	"DASHBOARD_ENABLED": true, "DASHBOARD_REQUIRE_LOGIN": true,
 	"COMPRESS_PROMPT": true, "CACHE_CONTROL_INJECTION": true, "REASONING_IN_CONTENT": true,
+	"SYSTEM_PROMPT_MODE": true,
 }
 
 // catalogExtras are documented keys the catalog may hold beyond the

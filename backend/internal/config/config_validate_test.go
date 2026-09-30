@@ -384,6 +384,36 @@ func TestWaitingRoomRetries(t *testing.T) {
 	t.Setenv("WAITING_ROOM_RETRIES", "")
 }
 
+// TestSystemPromptMode pins SYSTEM_PROMPT_MODE: default replace (the pinned
+// free-mode prompt is installed on the wire), "marker" as the revert path, and
+// a hard load error for an unrecognized word — a silent fallback would keep the
+// destructive mode on for an operator who meant to turn it off.
+func TestSystemPromptMode(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("AUTH_TOKENS", "tok-1")
+
+	if cfg, err := Load(""); err != nil {
+		t.Fatalf("Load (default): %v", err)
+	} else if cfg.SystemPromptMode != SystemPromptModeReplace {
+		t.Errorf("SystemPromptMode = %q, want %q (default)", cfg.SystemPromptMode, SystemPromptModeReplace)
+	}
+
+	// The revert path, case-insensitively.
+	t.Setenv("SYSTEM_PROMPT_MODE", "MARKER")
+	if cfg, err := Load(""); err != nil {
+		t.Fatalf("Load (marker): %v", err)
+	} else if cfg.SystemPromptMode != SystemPromptModeMarker {
+		t.Errorf("SystemPromptMode = %q, want %q", cfg.SystemPromptMode, SystemPromptModeMarker)
+	}
+
+	// A typo must fail the load, never coerce to a mode.
+	t.Setenv("SYSTEM_PROMPT_MODE", "markers")
+	if _, err := Load(""); err == nil || !strings.Contains(err.Error(), "SYSTEM_PROMPT_MODE") {
+		t.Fatalf("Load (typo): err = %v, want error mentioning SYSTEM_PROMPT_MODE", err)
+	}
+	t.Setenv("SYSTEM_PROMPT_MODE", "")
+}
+
 func TestBadDuration(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("AUTH_TOKENS", "tok")

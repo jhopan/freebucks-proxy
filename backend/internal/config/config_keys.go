@@ -80,6 +80,10 @@ type rawConfig struct {
 	CompressPrompt           string          `json:"COMPRESS_PROMPT"`
 	CacheControlInjection    string          `json:"CACHE_CONTROL_INJECTION"`
 	ReasoningInContent       string          `json:"REASONING_IN_CONTENT"`
+	// SystemPromptMode records SYSTEM_PROMPT_MODE (default "replace"): how the
+	// upstream envelope treats the run's system message. Parsed by
+	// parseSystemPromptMode, validated against the two mode words.
+	SystemPromptMode string `json:"SYSTEM_PROMPT_MODE"`
 	// MaturityEnabled is the global kill-switch for streak-maturity automation
 	// (MATURITY_ENABLED; default true).
 	MaturityEnabled bool `json:"MATURITY_ENABLED"`
@@ -179,6 +183,11 @@ func defaultRawConfig() rawConfig {
 		// competing for that seat. Set false for hosts where the scan is
 		// meaningless (CI, containers that cannot read the process table).
 		SingleClientGuard: true,
+		// SYSTEM_PROMPT_MODE default replace: the upstream free-mode gate is a
+		// byte-exact opening test and the rest of the shipped prompt is
+		// client-local text, so a gateway can only carry the real prompt by
+		// installing it itself. See upstream/system_prompt.go.
+		SystemPromptMode: SystemPromptModeReplace,
 		// WAITING_ROOM_CHAIN on by default: the fork's own ban post-mortem
 		// (fb986b48) found that queuing WITHOUT producing the waiting_room ad
 		// engagement is the shape upstream flags. The CLI always runs that

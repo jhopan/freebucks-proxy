@@ -161,6 +161,8 @@ func renderKey(c *Config, key string) (val string, valueIsSecret bool) {
 		return strconv.FormatBool(c.CacheControlInjection), false
 	case "REASONING_IN_CONTENT":
 		return c.ReasoningInContent, false
+	case "SYSTEM_PROMPT_MODE":
+		return c.SystemPromptMode, false
 	case "MATURITY_ENABLED":
 		return strconv.FormatBool(c.MaturityEnabled), false
 	case "MATURITY_TARGET_DAYS":

@@ -56,6 +56,11 @@ func (c Config) Validate() error {
 		return errors.New("MAX_SPILL_ACCOUNTS cannot be negative (0 = unbounded)")
 	case c.MaturityTargetDays < 1 || c.MaturityTargetDays > 28:
 		return fmt.Errorf("MATURITY_TARGET_DAYS must be an integer in 1..28 (got %d)", c.MaturityTargetDays)
+	case c.SystemPromptMode != SystemPromptModeMarker && c.SystemPromptMode != SystemPromptModeReplace:
+		// No silent coercion: an unrecognized word here would quietly keep the
+		// destructive default on, which is exactly the mistake this knob exists
+		// to let an operator undo.
+		return fmt.Errorf("SYSTEM_PROMPT_MODE must be %q or %q (got %q)", SystemPromptModeMarker, SystemPromptModeReplace, c.SystemPromptMode)
 	}
 	// PIN_MODEL cross-check: every pinned slot must address a configured
 	// AUTH_TOKENS position, so a typo surfaces at load instead of silently

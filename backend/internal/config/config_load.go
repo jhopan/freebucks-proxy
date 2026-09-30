@@ -140,6 +140,7 @@ func LoadOpts(configPath string, opts LoadOptions) (Config, error) {
 	overrideString(&raw.CompressPrompt, "COMPRESS_PROMPT")
 	overrideString(&raw.CacheControlInjection, "CACHE_CONTROL_INJECTION")
 	overrideString(&raw.ReasoningInContent, "REASONING_IN_CONTENT")
+	overrideString(&raw.SystemPromptMode, "SYSTEM_PROMPT_MODE")
 
 	parseDuration := func(raw, name string) (time.Duration, error) {
 		d, err := time.ParseDuration(strings.TrimSpace(raw))
@@ -458,6 +459,7 @@ func LoadOpts(configPath string, opts LoadOptions) (Config, error) {
 		CompressPrompt:           parseCompressPrompt(raw.CompressPrompt),
 		CacheControlInjection:    parseCacheControlInjection(raw.CacheControlInjection),
 		ReasoningInContent:       parseReasoningInContent(raw.ReasoningInContent),
+		SystemPromptMode:         parseSystemPromptMode(raw.SystemPromptMode),
 	}
 	// Auto-discover CLI token if a discovery hook was wired (LoadOpts,
 	// issue #283) AND no AUTH_TOKENS were explicitly configured AND
@@ -646,6 +648,7 @@ func applyMappedValues(raw *rawConfig, get func(string) string) {
 	overrideStringFrom(&raw.CompressPrompt, get, "COMPRESS_PROMPT")
 	overrideStringFrom(&raw.CacheControlInjection, get, "CACHE_CONTROL_INJECTION")
 	overrideStringFrom(&raw.ReasoningInContent, get, "REASONING_IN_CONTENT")
+	overrideStringFrom(&raw.SystemPromptMode, get, "SYSTEM_PROMPT_MODE")
 }
 
 // override applies envName from get to target through parse. An unset or
@@ -724,6 +727,18 @@ func parseCacheControlInjection(s string) bool {
 		return false
 	}
 	return true
+}
+
+// parseSystemPromptMode normalizes SYSTEM_PROMPT_MODE: empty falls back to the
+// default (replace), anything else is lowercased and left for Validate to
+// accept or reject. It deliberately does NOT silently coerce an unknown word to
+// a mode — this knob's whole purpose is to be a revert path, so a typo like
+// "markers" must fail the load loudly rather than quietly keeping replace on.
+func parseSystemPromptMode(s string) string {
+	if s = strings.ToLower(strings.TrimSpace(s)); s == "" {
+		return SystemPromptModeReplace
+	}
+	return s
 }
 
 // parseReasoningInContent returns the think-tag label used to fold reasoning

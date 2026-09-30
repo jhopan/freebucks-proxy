@@ -414,9 +414,21 @@ messages: [systemMessage(system), ...agentState.messageHistory]
 ```
 
 `systemMessage()` (`common/src/util/messages.ts:564-582`) mengubah string menjadi
-`[{ type: 'text', text: <prompt> }]`, dan `convertToOpenAICompatibleChatMessages`
-(`:61`) meneruskan `content` apa adanya untuk role `system`. Jadi **system prompt
-selalu `messages[0]`**, content berupa array part.
+`[{ type: 'text', text: <prompt> }]`. Jadi **system prompt selalu `messages[0]`**.
+
+Tapi **di wire content-nya STRING, bukan array part** — koreksi terhadap klaim awal
+di dokumen ini. Dua langkah di `convertCbToModelMessages`
+(`common/src/util/messages.ts:338`, komentar sumbernya sendiri menyebutnya "the single
+chokepoint where all messages are converted to provider format") merapikannya:
+
+- `convertToolMessage` (`:195-203`): untuk role `system`, part digabung jadi satu string
+  — `content: message.content.map(({ text }) => text).join('\n\n')` (`:200`).
+- Loop agregasi (`:373-375`): pesan system yang berurutan **digabung** —
+  `lastMessage.content += '\n\n' + message.content`.
+
+Konsekuensinya untuk proxy: mengirim `content` sebagai array part untuk role `system`
+adalah bentuk yang tidak pernah dihasilkan klien resmi. `SYSTEM_PROMPT_MODE=replace`
+karena itu memasang prompt sebagai string (§12g).
 
 Prompt persisnya, dipanen dari artefak terpasang:
 
@@ -495,3 +507,57 @@ tidak salah dibaca sebagai jalur hidup.
    Catatan: karena `foreign_system_prompt` mati, sanitasi hanya mengubah prompt yang
    dibaca model, bukan verdict upstream. Menghapusnya adalah perubahan perilaku dan
    perlu keputusan terpisah, bukan bagian dari perbaikan ini.
+
+### 12g. `SYSTEM_PROMPT_MODE` — menyuntik utuh prompt base2 free mode
+
+Sampai §12e proxy hanya **menambahkan** kalimat pembuka kalau belum ada. Itu cukup untuk
+gate, tapi tidak membuat wire membawa prompt yang benar-benar dikirim klien resmi:
+seluruh isi setelah kalimat pembuka — `# General guidelines`, kontrak `spawn_agents`,
+blok `# Freebuff Meta-information`, dua `<example>` — adalah teks yang disusun klien di
+mesinnya sendiri. Gateway tidak bisa merekonstruksinya dari request masuk.
+
+Knob baru: **`SYSTEM_PROMPT_MODE`** (`marker` | `replace`, default **`replace`**,
+restart-only — di-snapshot ke klien upstream saat boot).
+
+| Mode | Perilaku | Kapan dipakai |
+|---|---|---|
+| `replace` (default) | Semua pesan role `system` **dibuang**, lalu satu pesan system dipasang di indeks 0 berisi prompt base2 free mode yang dipin. Klien pihak ketiga kehilangan prompt-nya. | Ingin wire identik dengan klien resmi |
+| `marker` | Perilaku lama: saring marker harness asing, lalu prepend kalimat pembuka kalau pesan system belum membuka secara canonical | Jalur revert |
+
+Nilai tak dikenal = **error saat load**, bukan fallback senyap: knob ini jalur revert,
+jadi salah ketik (`markers`) harus gagal keras, bukan diam-diam tetap `replace`.
+
+**Nol manfaat deteksi.** Ini keputusan operator, bukan perbaikan gate. Gate hidup cuma
+membaca kalimat pembuka di byte 0 (§12b), dan `foreign_system_prompt` sudah dihapus
+(§12c) — jadi mengganti prompt tidak mengubah verdict upstream apa pun. Yang berubah:
+model membaca instruksi `spawn_agents`/`write_todos` yang klien pihak ketiga tidak punya,
+sementara instruksi harness klien itu sendiri hilang. Itu sebabnya knob-nya eksplisit dan
+terdokumentasi sebagai destruktif, bukan default tersembunyi.
+
+**Provenance prompt yang dipin** — `backend/internal/upstream/system_prompt_base2_free.txt`
+(di-`//go:embed` oleh `system_prompt.go`):
+
+- Sumber: `createBase2('free')` — `agents/base2/base2.ts:258-379` di vendor `0065263`,
+  dengan cabang free-mode (`isFreebuff && isLean`) dan model free default.
+- Verifikasi terhadap `freebuff.exe` terpasang (0.0.196): offset **101839445**, panjang
+  **6686** byte; identik setelah (a) meng-unescape **14** `\`` yang dibutuhkan template
+  literal JS dan (b) menormalkan dua titik isi runtime. Dipin oleh
+  `TestPinnedSystemPromptShape`.
+- Model di baris `You are running on the … model.` **bukan placeholder** di klien: CLI
+  memanggang satu varian per file agen (`base2-free-glm.ts`, `base2-free-luna.ts`, …),
+  jadi nama model di situ konstanta build-time. Proxy mengisinya dari `model` request
+  (yang sudah di-resolve), fallback `deepseek/deepseek-v4-flash`.
+- `{CODEBUFF_CURRENT_DATE}` diisi tanggal lokal **gateway**, bukan klien — gateway tidak
+  bisa melihat jam mesin klien, jadi bisa berbeda satu hari antar timezone. Kosmetik:
+  gate tidak pernah membaca tanggal.
+- **Ekor template sengaja TIDAK dipin**: `{CODEBUFF_FILE_TREE_PROMPT_SMALL}`,
+  `{CODEBUFF_KNOWLEDGE_FILES_CONTENTS}`, `{CODEBUFF_SYSTEM_INFO_PROMPT}`, dan blok
+  `# Initial Git Changes` (`{CODEBUFF_GIT_CHANGES_PROMPT}`) adalah data mesin klien.
+  Mengirim placeholder itu apa adanya justru lebih mencolok daripada tidak mengirimnya,
+  jadi teks yang dipin berhenti di blok `<example>` terakhir.
+- **Bentuk pesan**: satu pesan system di indeks 0, `content` berupa **string** — bukan
+  array part (§12d). Pesan non-system dipertahankan urut dan utuh.
+
+Perubahan terkait: klaim §12d bahwa `content` system berupa array part **dikoreksi** —
+`convertToolMessage` (`common/src/util/messages.ts:200`) menggabung part menjadi string
+dan loop agregasi (`:373-375`) menggabung pesan system berurutan.

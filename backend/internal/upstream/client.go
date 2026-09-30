@@ -64,6 +64,13 @@ type Client struct {
 	// in ~2 attempts.
 	waitingRoomRetriesLimit int
 
+	// systemPromptMode is SYSTEM_PROMPT_MODE (config.SystemPromptMode*): how
+	// the envelope treats the run's system message. "replace" installs the
+	// pinned free-mode base2 prompt and drops the caller's system messages;
+	// "marker" only prepends the canonical opening. Snapshotted at
+	// construction — the knob is restart-only.
+	systemPromptMode string
+
 	// capacityDeferredRetries counts free_mode_capacity_deferred retries
 	// served by this client: the free-tier capacity queue is retried
 	// in-place against the SAME lease/session, bounded by the
@@ -200,6 +207,7 @@ func NewWithIndex(token string, tokenIndex int, cfg *config.Config) (*Client, er
 		debugDump:               cfg.DebugDump,
 		transientRetriesLimit:   cfg.TransientRetries,
 		waitingRoomRetriesLimit: cfg.WaitingRoomRetries,
+		systemPromptMode:        cfg.SystemPromptMode,
 		http2Upstream:           cfg.HTTP2Upstream,
 		rateLimitEvents:         make(map[string]*atomic.Int64),
 	}

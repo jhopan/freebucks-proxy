@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"freebucks-proxy/backend/internal/config"
 )
 
 // ChatOptions carries the envelope values for a chat completion request.
@@ -56,6 +58,12 @@ type ChatOptions struct {
 	// (llm.ts:115 `...(extraCodebuffMetadata ?? {})`) — caller-supplied
 	// keys merged BEFORE reserved identifiers so reserved keys win.
 	ExtraCodebuffMetadata map[string]string
+	// SystemPromptMode is SYSTEM_PROMPT_MODE, stamped by ChatCompletions from
+	// the client's config — never set by a caller. "" keeps the historical
+	// prepend-only behaviour (what a bare ChatOptions in a test gets);
+	// config.SystemPromptModeReplace overwrites the run's system message with
+	// the pinned free-mode prompt. See ensureSystemPrompt.
+	SystemPromptMode string
 }
 
 // ChatCompletions POSTs an OpenAI-shaped request to the upstream chat
@@ -83,6 +91,10 @@ func (c *Client) ChatCompletions(ctx context.Context, opts ChatOptions, body []b
 		}
 	}
 
+	// The system-prompt mode is snapshotted on the client at construction
+	// (SYSTEM_PROMPT_MODE is restart-only), so it is stamped here rather than
+	// by every caller: a caller can neither enable nor disable the overwrite.
+	opts.SystemPromptMode = c.systemPromptMode
 	enveloped, err := injectEnvelope(body, c.costMode, opts)
 	if err != nil {
 		return nil, fmt.Errorf("upstream: envelope: %w", err)
@@ -495,6 +507,8 @@ func hasCanonicalOpening(content string) bool {
 // marker rather than replacing, so custom system instructions survive. A
 // message that already opens with ANY of the five canonical identities is
 // left alone regardless of agentID: the gate is any-of-five.
+//
+// This is the SYSTEM_PROMPT_MODE=marker arm, reached through ensureSystemPrompt.
 func ensureCliSystemMarker(payload map[string]any, agentID string) {
 	marker := systemMarkerFor(agentID)
 	rawMsgs, ok := payload["messages"].([]any)
@@ -569,6 +583,78 @@ func ensureCliSystemMarker(payload map[string]any, agentID string) {
 	payload["messages"] = newMsgs
 }
 
+// ensureSystemPrompt installs the run's canonical "You are Buffy…" identity at
+// byte position 0 of the system message the wire carries. mode is
+// SYSTEM_PROMPT_MODE:
+//
+//   - replace: DROP the run's system messages and install the pinned free-mode
+//     base2 prompt as the single system message at index 0 — the exact shape
+//     the shipped client sends. The caller's own system prompt does not
+//     survive, and that is the point: it is the only way the wire carries the
+//     full prompt the real client sends. Destructive to third-party clients
+//     (Cursor/Claude Code), which lose the instructions their own harness
+//     relies on while the pinned text tells the model to use spawn_agents.
+//   - marker (or ""): the historical behaviour — sanitize foreign harness
+//     markers, then prepend the canonical opening when no system message
+//     already opens with one of the five gate openings.
+//
+// Neither arm is a detection signal: upstream's only live system-prompt
+// inspection is the byte-0 opening test (hasFreebuffRootSystemPromptOpening),
+// and foreign_system_prompt was deleted at 0ae8779d2. See
+// docs/operations/OFFICIAL-CLIENT-TEARDOWN.md §12.
+func ensureSystemPrompt(payload map[string]any, agentID, mode string) {
+	if mode == config.SystemPromptModeReplace {
+		replaceSystemPrompt(payload)
+		return
+	}
+	ensureCliSystemMarker(payload, agentID)
+}
+
+// replaceSystemPrompt swaps the run's system messages for the pinned free-mode
+// prompt. Every system-role message is dropped and exactly one is installed at
+// index 0, mirroring run-agent-step.ts:409 (`messages: [systemMessage(system),
+// ...agentState.messageHistory]`) — the shipped clients send ONE system
+// message, first, always. Non-system messages keep their order and content.
+//
+// The model line is filled from the request's resolved model id, which is the
+// same string the client would have baked into its own prompt variant.
+func replaceSystemPrompt(payload map[string]any) {
+	model, _ := payload["model"].(string)
+	prompt := renderBase2FreePrompt(model)
+
+	rawMsgs, ok := payload["messages"].([]any)
+	if !ok {
+		payload["messages"] = []any{systemMessage(prompt)}
+		return
+	}
+
+	msgs := make([]any, 0, len(rawMsgs)+1)
+	msgs = append(msgs, systemMessage(prompt))
+	for _, m := range rawMsgs {
+		msg, ok := m.(map[string]any)
+		if !ok {
+			msgs = append(msgs, m)
+			continue
+		}
+		switch role, _ := msg["role"].(string); role {
+		case "system", "developer":
+			// dropped: replaced wholesale by the pinned prompt
+		default:
+			msgs = append(msgs, msg)
+		}
+	}
+	payload["messages"] = msgs
+}
+
+// systemMessage builds a system-role message carrying content as a plain
+// string. A string is the shape the wire actually carries: the client's
+// convertToolMessage joins content parts into one string and the aggregation
+// loop merges consecutive system messages (common/src/util/messages.ts:195-203,
+// :373-375), so an array-of-parts system message never reaches upstream.
+func systemMessage(content string) map[string]any {
+	return map[string]any{"role": "system", "content": content}
+}
+
 // injectEnvelope merges the CLI fingerprint into the request body without
 // disturbing client-supplied fields: codebuff_metadata, provider
 // data_collection=deny, and forced streaming. The envelope carries no stop
@@ -582,7 +668,7 @@ func injectEnvelope(body []byte, costMode string, opts ChatOptions) ([]byte, err
 		return nil, fmt.Errorf("parse request body: %w", err)
 	}
 
-	ensureCliSystemMarker(payload, opts.AgentID)
+	ensureSystemPrompt(payload, opts.AgentID, opts.SystemPromptMode)
 
 	// client_id is minted ONCE PER RUN and repeated here — never a fresh
 	// draw per chat call. The CLI mints it once per prompt (run.ts:722

@@ -1308,3 +1308,72 @@ Verifikasi: `gofmt` bersih, `go vet ./backend/internal/upstream/` bersih,
 - Cabang desktop di `systemMarkerFor` belum punya jalur hidup; kalau parser registry
   mulai me-resolve computed key `FREE_MODE_AGENT_MODELS`, tambahkan test yang membuktikan
   ID-nya benar-benar sampai ke `ChatOptions.AgentID`.
+
+## 2026-09-29 — `SYSTEM_PROMPT_MODE`: prompt base2 free mode disuntik utuh
+
+Permintaan operator: wire harus membawa **system prompt resmi secara utuh**, bukan cuma
+kalimat pembukanya. Dikerjakan sebagai knob yang bisa dibalik.
+
+### Yang ditambahkan
+
+- **`SYSTEM_PROMPT_MODE`** (`marker` | `replace`; default **`replace`**; restart-only,
+  di-snapshot ke klien upstream saat boot).
+  - `replace` — semua pesan role `system` dibuang, lalu satu pesan system dipasang di
+    indeks 0 berisi prompt base2 free mode yang dipin, `content` berupa **string**.
+    Pesan non-system tetap utuh dan urut.
+  - `marker` — perilaku lama (saring marker asing + prepend kalimat pembuka).
+  - Nilai tak dikenal = **error saat load**, bukan fallback senyap: knob ini jalur
+    revert, jadi salah ketik harus gagal keras.
+- **Prompt yang dipin**: `backend/internal/upstream/system_prompt_base2_free.txt`
+  (6.662 byte), di-`//go:embed` oleh `backend/internal/upstream/system_prompt.go`.
+  Sumber `createBase2('free')` (`agents/base2/base2.ts:258-379`, vendor `0065263`),
+  diverifikasi terhadap `freebuff.exe` terpasang (0.0.196) di offset **101839445**
+  panjang **6686**: identik setelah meng-unescape 14 `\`` dan menormalkan dua titik isi.
+  Model di baris `You are running on the … model.` di klien adalah konstanta build-time
+  per file agen; proxy mengisinya dari `model` request (fallback
+  `deepseek/deepseek-v4-flash`). Tanggal memakai jam **gateway** (kosmetik).
+  Ekor template (`FILE_TREE_PROMPT_SMALL`, `KNOWLEDGE_FILES_CONTENTS`,
+  `SYSTEM_INFO_PROMPT`, `GIT_CHANGES_PROMPT`) **tidak** dipin — itu data mesin klien,
+  dan mengirim placeholder apa adanya lebih mencolok daripada tidak mengirimnya.
+
+### Kenapa ini keputusan operator, bukan perbaikan gate
+
+Gate hidup cuma membaca kalimat pembuka di byte 0, dan `foreign_system_prompt` sudah
+dihapus upstream (`0ae8779d2`) — jadi mengganti prompt **tidak mengubah verdict upstream
+apa pun**. Yang berubah: klien pihak ketiga (Cursor/Claude Code) kehilangan instruksi
+harness-nya, sementara model disuruh memakai `spawn_agents`/`write_todos` yang klien itu
+tidak punya. Karena itu knob-nya eksplisit, terdokumentasi sebagai destruktif, dan
+`marker` disediakan sebagai jalur revert.
+
+### Koreksi dokumentasi
+
+Klaim §12d teardown bahwa `content` pesan system di wire berupa array part **salah**:
+`convertToolMessage` (`common/src/util/messages.ts:200`) menggabung part jadi string dan
+loop agregasi (`:373-375`) menggabung pesan system berurutan. Diperbaiki di dokumen dan
+jadi alasan `replace` memasang `content` sebagai string.
+
+### File
+
+- `backend/internal/upstream/system_prompt.go`, `system_prompt_base2_free.txt` (baru).
+- `backend/internal/upstream/chat.go` — `ensureSystemPrompt` (dua arm),
+  `replaceSystemPrompt`, `ChatOptions.SystemPromptMode`; `ensureCliSystemMarker` jadi arm
+  `marker`.
+- `backend/internal/upstream/client.go` — `systemPromptMode` dari `cfg`.
+- `backend/internal/config/{config,config_keys,config_load,config_validate,data,keycatalog}.go`
+  + `keycatalog_test.go`, `config_validate_test.go`; `server/admin_env.go`
+  (`restartOnlyConfigKeys` + `effectiveConfigKV`).
+- `backend/internal/upstream/system_prompt_replace_test.go` (baru).
+- `.env.example`, `.env.full-example`, `docs/operations/OFFICIAL-CLIENT-TEARDOWN.md` §12g.
+
+### Hasil uji
+
+`gofmt` bersih, `go vet ./backend/...` bersih, `go test -count=1 ./backend/...` hijau.
+
+### Sisa / belum
+
+- Prompt yang dipin adalah varian **free (lean)** dengan model default; klien yang
+  berjalan di model free lain akan menyebut model itu di baris meta (diisi dari request),
+  tapi `spawn`-reviewer di dalamnya tetap `code-reviewer-deepseek-flash` (fallback
+  constant-folded di binary). Kalau perlu per-model, itu butuh tabel pemetaan terpisah.
+- Dua cermin `FOREIGN_HARNESS_PROMPT_MARKERS` (15 di `chat.go` vs 4 di
+  `convert/foreign_signals.go`) masih belum direkonsiliasi — sinyalnya sudah mati.

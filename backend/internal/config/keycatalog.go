@@ -358,6 +358,12 @@ var keyCatalog = []KeyDef{
 		Description: `IANA zone the gateway declares on session reads (x-fb-timezone); the upstream server picks the account's daily reset zone from it. Empty = auto: the host zone when it is a real non-UTC zone, else the detected egress region's zone, else UTC. An invalid value falls back to auto with a WARN.`,
 	},
 	{
+		Key: "SYSTEM_PROMPT_MODE", Group: GroupUpstream, Kind: "select", Enum: []string{"marker", "replace"},
+		RestartOnly: true,
+		Default:     "replace",
+		Description: `How the upstream envelope treats the run's system message. "replace" (default) drops the caller's system messages and installs the pinned free-mode base2 prompt the shipped client sends, so the wire carries the real prompt instead of only its opening sentence. DESTRUCTIVE to third-party clients (Cursor/Claude Code): their own system instructions are discarded while the pinned text tells the model to use spawn_agents/write_todos they do not have. It buys no detection signal — upstream's only live system-prompt check is the byte-0 opening test (docs/operations/OFFICIAL-CLIENT-TEARDOWN.md §12). "marker" restores the prepend-only behaviour. Restart-only: snapshotted into the upstream clients at boot.`,
+	},
+	{
 		Key: "TLS_FINGERPRINT", Group: GroupUpstream, Kind: "select",
 		Enum:        []string{"auto", "bun", "chrome120", "chrome126", "safari17", "safari18", "firefox120", "firefox128", "edge126", "random"},
 		RestartOnly: true, Default: "", Hidden: true,
