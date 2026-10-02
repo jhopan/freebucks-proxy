@@ -1,0 +1,446 @@
+[
+ {
+  "type": "function",
+  "function": {
+   "name": "apply_patch",
+   "description": "apply_patch tool",
+   "parameters": {
+    "type": "object",
+    "properties": {}
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "add_message",
+   "description": "add_message tool",
+   "parameters": {
+    "type": "object",
+    "properties": {}
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "ask_user",
+   "description": "ask_user tool",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "question": {
+      "type": "string"
+     }
+    }
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "code_search",
+   "description": "code_search tool",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "q": {
+      "type": "string",
+      "description": "Query"
+     }
+    },
+    "required": [
+     "q"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "cloud_plan_ready",
+   "description": "cloud_plan_ready tool",
+   "parameters": {
+    "type": "object",
+    "properties": {}
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "end_turn",
+   "description": "end_turn tool",
+   "parameters": {
+    "type": "object",
+    "properties": {}
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "find_files",
+   "description": "find_files tool",
+   "parameters": {
+    "type": "object",
+    "properties": {}
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "glob",
+   "description": "glob tool",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "pattern": {
+      "type": "string"
+     },
+     "path": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "pattern"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "gravity_index",
+   "description": "gravity_index tool",
+   "parameters": {
+    "type": "object",
+    "properties": {}
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "list_directory",
+   "description": "list_directory tool",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string",
+      "description": "Directory path"
+     }
+    },
+    "required": [
+     "path"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "lookup_agent_info",
+   "description": "lookup_agent_info tool",
+   "parameters": {
+    "type": "object",
+    "properties": {}
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "propose_str_replace",
+   "description": "propose_str_replace tool",
+   "parameters": {
+    "type": "object",
+    "properties": {}
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "propose_write_file",
+   "description": "propose_write_file tool",
+   "parameters": {
+    "type": "object",
+    "properties": {}
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "read_docs",
+   "description": "read_docs tool",
+   "parameters": {
+    "type": "object",
+    "properties": {}
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "read_files",
+   "description": "read_files tool",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "paths": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Files to read"
+     }
+    },
+    "required": [
+     "paths"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "read_subtree",
+   "description": "read_subtree tool",
+   "parameters": {
+    "type": "object",
+    "properties": {}
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "read_url",
+   "description": "read_url tool",
+   "parameters": {
+    "type": "object",
+    "properties": {}
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "render_ui",
+   "description": "render_ui tool",
+   "parameters": {
+    "type": "object",
+    "properties": {}
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "run_file_change_hooks",
+   "description": "run_file_change_hooks tool",
+   "parameters": {
+    "type": "object",
+    "properties": {}
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "run_terminal_command",
+   "description": "run_terminal_command tool",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "command": {
+      "type": "string"
+     },
+     "blocking": {
+      "type": "boolean",
+      "description": "Run to completion"
+     }
+    },
+    "required": [
+     "command"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "set_messages",
+   "description": "set_messages tool",
+   "parameters": {
+    "type": "object",
+    "properties": {}
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "set_output",
+   "description": "set_output tool",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "output": {
+      "type": "string"
+     }
+    }
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "skill",
+   "description": "skill tool",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "name"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "spawn_agents",
+   "description": "spawn_agents tool",
+   "parameters": {
+    "type": "object",
+    "properties": {}
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "str_replace",
+   "description": "str_replace tool",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "file_path": {
+      "type": "string"
+     },
+     "old_string": {
+      "type": "string"
+     },
+     "new_string": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "file_path",
+     "old_string",
+     "new_string"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "suggest_followups",
+   "description": "suggest_followups tool",
+   "parameters": {
+    "type": "object",
+    "properties": {}
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "task_completed",
+   "description": "task_completed tool",
+   "parameters": {
+    "type": "object",
+    "properties": {}
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "think_deeply",
+   "description": "think_deeply tool",
+   "parameters": {
+    "type": "object",
+    "properties": {}
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "web_search",
+   "description": "web_search tool",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "query": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "query"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "write_file",
+   "description": "write_file tool",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "file_path": {
+      "type": "string"
+     },
+     "content": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "file_path",
+     "content"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "write_todos",
+   "description": "write_todos tool",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "todos": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     }
+    }
+   }
+  }
+ }
+]
